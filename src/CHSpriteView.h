@@ -1,7 +1,7 @@
 #pragma once
 
 #include <SPI.h>
-#include <SD.h>
+#include "src/SD/SD.h"
 #include <CHGfx.h>
 
 

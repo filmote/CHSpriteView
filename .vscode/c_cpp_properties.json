@@ -39,7 +39,6 @@
                 "/Users/simonholmes/Library/Arduino15/packages/CHGame/hardware/ch32v/0.1.0/variants/CH32X035/CHGame",
                 "/Users/simonholmes/Documents/Arduino/libraries/CHGfx-main/src",
                 "/Users/simonholmes/Library/Arduino15/packages/CHGame/hardware/ch32v/0.1.0/libraries/SPI/src",
-                "/Users/simonholmes/Documents/Arduino/libraries/SD/src",
                 "/Users/simonholmes/Library/Arduino15/packages/CHGame/tools/riscv-none-embed-gcc/8.2.0/riscv-none-embed/include/c++/8.2.0",
                 "/Users/simonholmes/Library/Arduino15/packages/CHGame/tools/riscv-none-embed-gcc/8.2.0/riscv-none-embed/include/c++/8.2.0/riscv-none-embed/rv32imac/ilp32",
                 "/Users/simonholmes/Library/Arduino15/packages/CHGame/tools/riscv-none-embed-gcc/8.2.0/riscv-none-embed/include/c++/8.2.0/backward",
