@@ -30,7 +30,7 @@ void spiClaimForLcd(void)
     SPI1->CTLR1 |= SPI_SPE;
 }
 
-void sdBegin(void) { gfx_wait(); }
+void sdBegin(void) { /*gfx_wait(); */SD.begin(PB11); }
 void sdEnd(void)   { spiClaimForLcd(); }
 
 static bool fileOpen(File &f, const char *path)
