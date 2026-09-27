@@ -4,6 +4,16 @@
 #include "src/SD/SD.h"
 #include <CHGfx.h>
 
+/* Bytes read from the card per fileRead() call. As many whole rows as fit
+ * are read at once and blitted before the next read, instead of one row
+ * per SD access -- sdBegin() re-runs SD.begin() every call, which is the
+ * real cost, so cutting how often it happens is what actually buys speed.
+ * Must be at least as big as one row (GFX_W/2 = 64 bytes covers any width
+ * up to a full screen). Override before including this header, e.g.
+ * `#define SPRITE_BUF_SIZE 1024` -- bigger trades RAM for fewer reads. */
+#ifndef SPRITE_BUF_SIZE
+#define SPRITE_BUF_SIZE 512
+#endif
 
 /* Return status codes for drawSpriteFile */
 enum SpriteResult {
@@ -48,6 +58,7 @@ void sdEnd(void);
  * transparentIndex: -1 (default) draws opaque; 0-15 skips pixels of that
  * palette index instead of drawing them.
  *
- * Returns 0 (SPRITE_OK) on success, or a negative error code on failure. */
+ * Returns 0 (SPRITE_OK) on success, or a negative error code on failure.
+ * SPRITE_ERR_TOO_WIDE means the sprite's row doesn't fit in SPRITE_BUF_SIZE
+ * bytes -- raise that constant, or narrow the sprite. */
 int drawSpriteFile(const char *path, int x, int y, int transparentIndex = -1);
-

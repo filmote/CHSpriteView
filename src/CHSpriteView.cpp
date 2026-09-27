@@ -78,22 +78,32 @@ int drawSpriteFile(const char *path, int x, int y, int transparentIndex)
     }
 
     const size_t rowBytes = (size_t)(w + 1) / 2;
-    if (rowBytes > GFX_W / 2) {
+    if (rowBytes > SPRITE_BUF_SIZE) {
         fileClose(f);
         return SPRITE_ERR_TOO_WIDE;
     }
 
-    uint8_t rowBuf[GFX_W / 2];
-    for (int row = 0; row < h; row++) {
-        if (!fileRead(f, rowBuf, rowBytes)) {
+    /* gfx_blit()'s signature always takes transparent as an int:
+     *   void gfx_blit(const uint8_t *spr, int x, int y, int w, int h, int transparent);
+     * -1 is assumed to mean "opaque, no transparent colour" -- worth
+     * confirming against CHGfx.h if sprites come out wrong. */
+
+    uint8_t buf[SPRITE_BUF_SIZE];
+    const int rowsPerRead = SPRITE_BUF_SIZE / rowBytes; /* >= 1, checked above */
+
+    int row = 0;
+    while (row < h) {
+        const int rowsThisRead = (rowsPerRead < h - row) ? rowsPerRead : (h - row);
+        const size_t bytesThisRead = rowsThisRead * rowBytes;
+
+        if (!fileRead(f, buf, bytesThisRead)) {
             fileClose(f);
             return SPRITE_ERR_TRUNCATED;
         }
-        /* gfx_blit()'s signature always takes transparent as an int:
-         *   void gfx_blit(const uint8_t *spr, int x, int y, int w, int h, int transparent);
-         * -1 is assumed to mean "opaque, no transparent colour" -- worth
-         * confirming against CHGfx.h if sprites come out wrong. */
-        gfx_blit(rowBuf, x, y + row, w, 1, transparentIndex);
+        for (int i = 0; i < rowsThisRead; i++) {
+            gfx_blit(buf + (size_t)i * rowBytes, x, y + row + i, w, 1, transparentIndex);
+        }
+        row += rowsThisRead;
     }
 
     fileClose(f);

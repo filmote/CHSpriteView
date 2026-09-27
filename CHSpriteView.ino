@@ -53,9 +53,9 @@ void setup()
 
 void loop()
 {
-    // if (!chGame.nextFrame()) return;
+    if (!chGame.nextFrame()) return;
 
-    Gfx.wait();
+    // Gfx.wait();
     Gfx.clear(Colors::Black);
     chGame.pollButtons();
 
@@ -63,12 +63,10 @@ void loop()
     fileName[10] = 48 + fire_Idx / 10;
     fileName[11] = 48 + fire_Idx % 10;
 
-    int returnCode = drawSpriteFile(fileName, 0, 64, 0);
-    // int returnCode = drawSpriteFile("SPRITE.BIN", 0, 64, 0);
-    // Serial.println(fileName);
-    // Serial.println(returnCode);
-    // Gfx.drawSprite(Sprite_InMem, 0, 0, 16, 16, 0);
-    Gfx.display();                  // one DMA burst, ~11 ms
+    drawSpriteFile(fileName, 0, 64, 0);
+
+    Gfx.drawSprite(Sprite_InMem, 0, 0, 16, 16, 0);
+    Gfx.display();                
 
     fire_Idx++;
     if (fire_Idx > 15) fire_Idx = 0;
