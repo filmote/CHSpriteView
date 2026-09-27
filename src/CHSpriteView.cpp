@@ -1,0 +1,101 @@
+/*
+ * spriteview.cpp - reads a headered, packed-4bpp sprite file off the SD
+ * card and blits it into CHGfx's framebuffer, one row at a time.
+ *
+ * Reading a row at a time (instead of the whole sprite into RAM) means a
+ * full 128x128 sprite costs a 64-byte stack buffer, not an 8 KB one --
+ * this chip doesn't have 8 KB to spare on top of CHGfx's own framebuffer.
+ * Every SD access stays bracketed in sdBegin()/sdEnd(), same as chgame.h
+ * asks, so the shared SPI bus hands back to the LCD cleanly between reads.
+ */
+#include "CHSpriteView.h"
+
+/* --------------------------------------------------------------------- */
+/* SPI1 arbitration                                                       */
+/* --------------------------------------------------------------------- */
+#define SPI_MSTR (1u << 2)
+#define SPI_SPE  (1u << 6)
+#define SPI_SSI  (1u << 8)
+#define SPI_SSM  (1u << 9)
+
+/* Master, mode 0, software NSS held high, MSB first, 8-bit frames, BR = 000
+ * (HCLK/2 = 24 MHz, the chip's ceiling and what gfx_begin(GFX_DIV2) asks for).
+ * CTLR2 is cleared so the SD side cannot leave TXDMAEN or SSOE asserted;
+ * CHGfx sets TXDMAEN itself per transfer and flips DFF as it needs it. */
+void spiClaimForLcd(void)
+{
+    SPI1->CTLR1  = 0;
+    SPI1->CTLR2  = 0;
+    SPI1->CTLR1  = SPI_MSTR | SPI_SSM | SPI_SSI;
+    SPI1->CTLR1 |= SPI_SPE;
+}
+
+void sdBegin(void) { gfx_wait(); }
+void sdEnd(void)   { spiClaimForLcd(); }
+
+static bool fileOpen(File &f, const char *path)
+{
+    sdBegin();
+    f = SD.open(path);
+    sdEnd();
+    return (bool)f;
+}
+
+static void fileClose(File &f)
+{
+    sdBegin();
+    f.close();
+    sdEnd();
+}
+
+static bool fileRead(File &f, uint8_t *dst, size_t n)
+{
+    sdBegin();
+    const bool ok = ((size_t)f.read(dst, n) == n);
+    sdEnd();
+    return ok;
+}
+
+int drawSpriteFile(const char *path, int x, int y, int transparentIndex)
+{
+    File f;
+    if (!fileOpen(f, path)) {
+        return SPRITE_ERR_FILE_OPEN;
+    }
+
+    uint8_t header[2];
+    if (!fileRead(f, header, 2)) {
+        fileClose(f);
+        return SPRITE_ERR_HEADER_READ;
+    }
+
+    const int w = header[0];
+    const int h = header[1];
+
+    if (w <= 0 || h <= 0) {
+        fileClose(f);
+        return SPRITE_ERR_BAD_DIMENSIONS;
+    }
+
+    const size_t rowBytes = (size_t)(w + 1) / 2;
+    if (rowBytes > GFX_W / 2) {
+        fileClose(f);
+        return SPRITE_ERR_TOO_WIDE;
+    }
+
+    uint8_t rowBuf[GFX_W / 2];
+    for (int row = 0; row < h; row++) {
+        if (!fileRead(f, rowBuf, rowBytes)) {
+            fileClose(f);
+            return SPRITE_ERR_TRUNCATED;
+        }
+        /* gfx_blit()'s signature always takes transparent as an int:
+         *   void gfx_blit(const uint8_t *spr, int x, int y, int w, int h, int transparent);
+         * -1 is assumed to mean "opaque, no transparent colour" -- worth
+         * confirming against CHGfx.h if sprites come out wrong. */
+        gfx_blit(rowBuf, x, y + row, w, 1, transparentIndex);
+    }
+
+    fileClose(f);
+    return SPRITE_OK;
+}
