@@ -87,7 +87,7 @@ struct DrawCtx {
     uint32_t  endByte;         /* one past the last byte of the last one   */
     bool      direct;          /* opaque byte copy into gfx_fb possible    */
     uint16_t  carryLen;        /* bytes of a split row gathered so far     */
-    SpriteDirty *dirty;        /* where to accumulate changes (may be null)*/
+    // SpriteDirty *dirty;        /* where to accumulate changes (may be null)*/
     uint8_t   carry[128];      /* one row: 255 px max -> 128 bytes         */
 };
 
@@ -317,7 +317,7 @@ static SV_CONSUMER void onBlock(const uint8_t *block, void *user)
 /* ------------------------------------------------------------------------ */
 /* Returns false if nothing of the sprite is on screen. */
 static bool setupCtx(DrawCtx &c, const SpriteFile &s, int x, int y,
-                     int transparent, SpriteDirty *dirty)
+                     int transparent)
 {
     c.s           = &s;
     c.x           = x;
@@ -325,7 +325,7 @@ static bool setupCtx(DrawCtx &c, const SpriteFile &s, int x, int y,
     c.transparent = transparent;
     c.rowBytes    = (uint16_t)((s.w + 1) >> 1);
     c.carryLen    = 0;
-    c.dirty       = dirty;
+    // c.dirty       = dirty;
 
     /* Fully off screen? */
     if (x >= GFX_W || y >= GFX_H || x + s.w <= 0 || y + s.h <= 0) return false;
@@ -408,12 +408,12 @@ int spriteLoad(SpriteFile &s, const char *path)
 /* ------------------------------------------------------------------------ */
 /* spriteDraw                                                                */
 /* ------------------------------------------------------------------------ */
-int spriteDraw(const SpriteFile &s, int x, int y, int transparent, SpriteDirty *dirty)
+int spriteDraw(const SpriteFile &s, int x, int y, int transparent)
 {
     if (s.w == 0) return SPRITE_ERR_NOT_LOADED;
 
     DrawCtx c;
-    if (!setupCtx(c, s, x, y, transparent, dirty)) return SPRITE_OK;
+    if (!setupCtx(c, s, x, y, transparent)) return SPRITE_OK;
 
     /* Everything below writes gfx_fb, and the card read borrows CHGfx's two
      * 512-byte flush chunk buffers as DMA landing space. Both are only safe
@@ -453,8 +453,7 @@ int spriteDraw(const SpriteFile &s, int x, int y, int transparent, SpriteDirty *
 /* Fallback for fragmented files: the ordinary File API into one of the
  * chunk buffers, fed through the same row consumer. Slower (FAT lookups,
  * one command per block) but still correct and still zero-copy per row. */
-static int drawViaFileApi(const char *path, int x, int y, int transparent,
-                          SpriteDirty *dirty)
+static int drawViaFileApi(const char *path, int x, int y, int transparent)
 {
     File f = SD.open(path);
     if (!f) return SPRITE_ERR_FILE_OPEN;
@@ -471,7 +470,7 @@ static int drawViaFileApi(const char *path, int x, int y, int transparent,
     if (s.w == 0 || s.h == 0) { f.close(); return SPRITE_ERR_BAD_DIMENSIONS; }
 
     DrawCtx c;
-    if (!setupCtx(c, s, x, y, transparent, dirty)) { f.close(); return SPRITE_OK; }
+    if (!setupCtx(c, s, x, y, transparent)) { f.close(); return SPRITE_OK; }
 
     gfx_wait();
     uint8_t *buf = gfx_chunkScratch();
@@ -488,11 +487,11 @@ static int drawViaFileApi(const char *path, int x, int y, int transparent,
     return SPRITE_OK;
 }
 
-int drawSpriteFile(const char *path, int x, int y, int transparent, SpriteDirty *dirty)
+int drawSpriteFile(const char *path, int x, int y, int transparent)
 {
     SpriteFile s;
     int r = spriteLoad(s, path);
-    if (r == SPRITE_ERR_FRAGMENTED) return drawViaFileApi(path, x, y, transparent, dirty);
+    if (r == SPRITE_ERR_FRAGMENTED) return drawViaFileApi(path, x, y, transparent);
     if (r != SPRITE_OK) return r;
-    return spriteDraw(s, x, y, transparent, dirty);
+    return spriteDraw(s, x, y, transparent);
 }

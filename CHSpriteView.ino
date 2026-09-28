@@ -323,7 +323,7 @@ void loop()
     /* Uncapped, this loop runs every few ms - faster than a switch stops
      * bouncing - so a toggle is only accepted 250 ms after the last one. */
     // static uint32_t lastToggle;
-    chGame.pollButtons();
+    // chGame.pollButtons();
     // if (millis() - lastToggle > 250) {
     //     if (chGame.justPressed(A_BUTTON))     { useDirtyRect = !useDirtyRect; lastToggle = millis(); }
     //     if (chGame.justPressed(START_BUTTON)) { capped = !capped;             lastToggle = millis(); }
@@ -335,6 +335,7 @@ void loop()
     // }
 
     if (!chGame.nextFrame()) return;
+    chGame.pollButtons();
 
     /* ---- 1. wait for the previous frame's panel transfer ------------- */
     uint32_t t0 = micros();
@@ -345,26 +346,26 @@ void loop()
     // SpriteDirty d;
     // spriteDirtyReset(d);
     // if (spriteDraw(fire[fireIdx], FIRE_X, FIRE_Y, -1, &d) != SPRITE_OK) statErrors++;
-    if (spriteDraw(fire[fireIdx], FIRE_X, FIRE_Y, -1) != SPRITE_OK) statErrors++;
-    uint32_t t2 = micros();
+    spriteDraw(fire[fireIdx], FIRE_X + 64, FIRE_Y, -1);
+    // uint32_t t2 = micros();
 
     /* ---- 3. framebuffer -> panel, asynchronously ---------------------- */
     /* Returns as soon as the first chunk is on the wire; the rest is fed by
      * the DMA interrupt while this loop carries on. Step 1 of the next frame
      * (or the SD bus claim itself) waits for it to finish. */
-    uint32_t px;
+    // uint32_t px;
     // if (useDirtyRect) {
     //     px = spriteFlushDirty(d);                     /* identical frame: sends nothing */
     // } else {
         gfx_flushRectAsync(FIRE_X, FIRE_Y, 128, 64);  /* the original: whole band */
-        px = 128u * 64u;
+        // px = 128u * 64u;
     // }
-    uint32_t t3 = micros();
+    // uint32_t t3 = micros();
 
-    statSdUs   += t2 - t1;
-    statLcdUs  += (t1 - t0) + (t3 - t2);
-    statPixels += px;
-    statFrames++;
+    // statSdUs   += t2 - t1;
+    // statLcdUs  += (t1 - t0) + (t3 - t2);
+    // statPixels += px;
+    // statFrames++;
 
     if (++fireIdx >= fireCount) fireIdx = 0;
 

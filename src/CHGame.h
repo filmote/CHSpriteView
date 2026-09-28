@@ -19,8 +19,6 @@ class CHGame : public CHGfx  {
 
 		uint8_t targetFPS = 30; 
 		uint16_t frameDelay = 1000 / targetFPS;
-		// CHANGE: was uint64_t. millis() is 32-bit and wraps cleanly under
-		// unsigned subtraction; 64-bit maths is a library call on RV32.
 		uint32_t lastFrameTime = 0;
 
 	public:

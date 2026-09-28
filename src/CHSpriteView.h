@@ -130,18 +130,18 @@ struct SpriteRect {
     int16_t x0, y0, x1, y1;
 };
 
-struct SpriteDirty {
-    SpriteRect band[SPRITE_BANDS];
-};
+// struct SpriteDirty {
+//     SpriteRect band[SPRITE_BANDS];
+// };
 
-void spriteDirtyReset(SpriteDirty &d);
-bool spriteDirtyEmpty(const SpriteDirty &d);
+// void spriteDirtyReset(SpriteDirty &d);
+// bool spriteDirtyEmpty(const SpriteDirty &d);
 
 /* Send every dirty part of the framebuffer to the panel and return the
  * number of pixels sent. All rectangles but the last are flushed blocking
  * (the bus is the bottleneck either way); the last is flushed async, so
  * the caller can get on with the next frame's logic while it drains. */
-uint32_t spriteFlushDirty(const SpriteDirty &d);
+// uint32_t spriteFlushDirty(const SpriteDirty &d);
 
 /* ------------------------------------------------------------------------ */
 /* API                                                                       */
@@ -158,9 +158,7 @@ int spriteLoad(SpriteFile &s, const char *path);
  * Only touches gfx_fb - call gfx_flush*() yourself afterwards. Waits for
  * any async flush in flight first, because it borrows CHGfx's two 512-byte
  * DMA chunk buffers as landing space for the card data. */
-int spriteDraw(const SpriteFile &s, int x, int y, int transparent = -1,
-               SpriteDirty *dirty = nullptr);
+int spriteDraw(const SpriteFile &s, int x, int y, int transparent = -1);
 
 /* Simon's original one-shot API: load + draw in one call. */
-int drawSpriteFile(const char *path, int x, int y, int transparent = -1,
-                   SpriteDirty *dirty = nullptr);
+int drawSpriteFile(const char *path, int x, int y, int transparent = -1);
