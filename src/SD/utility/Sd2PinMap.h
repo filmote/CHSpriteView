@@ -17,7 +17,13 @@
    along with the Arduino SdFat Library.  If not, see
    <http://www.gnu.org/licenses/>.
 */
-#if defined(ARDUINO_ARCH_CH32)
+/* CHGAME: stock SD 1.3.0 only knows AVR, ARM and ARC and hits "#error
+   Architecture or board not supported" on RISC-V. This branch (Simon's
+   version of the one-line fix Kevin had made locally) gives the CH32 core a
+   pin map. Only SS_PIN is ever used, and only by the non-SPI-library AVR
+   path, so these are here to satisfy the compiler; the card's real chip
+   select comes from PIN_SD_CS via SDCARD_SS_PIN in Sd2Card.h. */
+#if defined(ARDUINO_ARCH_CH32) || defined(CH32X035)
 
 #ifndef Sd2PinMap_h
   #define Sd2PinMap_h

@@ -40,10 +40,17 @@ uint8_t const CMD8 = 0X08;
 uint8_t const CMD9 = 0X09;
 /** SEND_CID - read the card identification information (CID register) */
 uint8_t const CMD10 = 0X0A;
+/** STOP_TRANSMISSION - end a READ_MULTIPLE_BLOCK (CMD18) stream.
+    CHGAME: added for the multi-block streaming reads in Sd2Card. */
+uint8_t const CMD12 = 0X0C;
 /** SEND_STATUS - read the card status register */
 uint8_t const CMD13 = 0X0D;
 /** READ_BLOCK - read a single data block from the card */
 uint8_t const CMD17 = 0X11;
+/** READ_MULTIPLE_BLOCK - stream consecutive blocks until CMD12.
+    CHGAME: added. One command and one access latency for the whole run,
+    instead of one CMD17 (and one latency) per 512-byte block. */
+uint8_t const CMD18 = 0X12;
 /** WRITE_BLOCK - write a single data block to the card */
 uint8_t const CMD24 = 0X18;
 /** WRITE_MULTIPLE_BLOCK - write blocks of data until a STOP_TRANSMISSION */

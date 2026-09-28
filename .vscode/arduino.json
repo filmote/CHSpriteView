@@ -1,5 +1,5 @@
 {
-    "configuration": "opt=o3std,rtlib=nano",
+    "configuration": "opt=osstd,rtlib=nano",
     "board": "CHGame:ch32v:CHGame",
     "sketch": "CHSpriteView.ino",
     "port": "/dev/tty.usbmodem14601"
