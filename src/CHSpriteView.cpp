@@ -453,45 +453,45 @@ int spriteDraw(const SpriteFile &s, int x, int y, int transparent)
 /* Fallback for fragmented files: the ordinary File API into one of the
  * chunk buffers, fed through the same row consumer. Slower (FAT lookups,
  * one command per block) but still correct and still zero-copy per row. */
-static int drawViaFileApi(const char *path, int x, int y, int transparent)
-{
-    File f = SD.open(path);
-    if (!f) return SPRITE_ERR_FILE_OPEN;
+// static int drawViaFileApi(const char *path, int x, int y, int transparent)
+// {
+//     File f = SD.open(path);
+//     if (!f) return SPRITE_ERR_FILE_OPEN;
 
-    uint8_t header[SPRITE_HEADER_BYTES];
-    if (f.read(header, SPRITE_HEADER_BYTES) != SPRITE_HEADER_BYTES) {
-        f.close();
-        return SPRITE_ERR_HEADER_READ;
-    }
-    SpriteFile s;
-    s.w = header[0];
-    s.h = header[1];
-    s.tailLen = 0;
-    if (s.w == 0 || s.h == 0) { f.close(); return SPRITE_ERR_BAD_DIMENSIONS; }
+//     uint8_t header[SPRITE_HEADER_BYTES];
+//     if (f.read(header, SPRITE_HEADER_BYTES) != SPRITE_HEADER_BYTES) {
+//         f.close();
+//         return SPRITE_ERR_HEADER_READ;
+//     }
+//     SpriteFile s;
+//     s.w = header[0];
+//     s.h = header[1];
+//     s.tailLen = 0;
+//     if (s.w == 0 || s.h == 0) { f.close(); return SPRITE_ERR_BAD_DIMENSIONS; }
 
-    DrawCtx c;
-    if (!setupCtx(c, s, x, y, transparent)) { f.close(); return SPRITE_OK; }
+//     DrawCtx c;
+//     if (!setupCtx(c, s, x, y, transparent)) { f.close(); return SPRITE_OK; }
 
-    gfx_wait();
-    uint8_t *buf = gfx_chunkScratch();
-    c.off = c.startByte;
-    if (!f.seek(c.startByte)) { f.close(); return SPRITE_ERR_TRUNCATED; }
-    while (c.off < c.endByte) {
-        uint32_t want = c.endByte - c.off;
-        if (want > 512) want = 512;
-        int got = f.read(buf, (uint16_t)want);
-        if (got <= 0) { f.close(); return SPRITE_ERR_TRUNCATED; }
-        consume(c, buf, (uint32_t)got);
-    }
-    f.close();
-    return SPRITE_OK;
-}
+//     gfx_wait();
+//     uint8_t *buf = gfx_chunkScratch();
+//     c.off = c.startByte;
+//     if (!f.seek(c.startByte)) { f.close(); return SPRITE_ERR_TRUNCATED; }
+//     while (c.off < c.endByte) {
+//         uint32_t want = c.endByte - c.off;
+//         if (want > 512) want = 512;
+//         int got = f.read(buf, (uint16_t)want);
+//         if (got <= 0) { f.close(); return SPRITE_ERR_TRUNCATED; }
+//         consume(c, buf, (uint32_t)got);
+//     }
+//     f.close();
+//     return SPRITE_OK;
+// }
 
 int drawSpriteFile(const char *path, int x, int y, int transparent)
 {
     SpriteFile s;
     int r = spriteLoad(s, path);
-    if (r == SPRITE_ERR_FRAGMENTED) return drawViaFileApi(path, x, y, transparent);
+    // if (r == SPRITE_ERR_FRAGMENTED) return drawViaFileApi(path, x, y, transparent);
     if (r != SPRITE_OK) return r;
     return spriteDraw(s, x, y, transparent);
 }

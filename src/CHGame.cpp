@@ -9,7 +9,7 @@ uint8_t previousButtonState = 0;
 uint8_t CHGame::buttonsState() {
 
 	uint8_t buttons = 0;
-	
+
 	if (digitalRead(PIN_BTN_A) == LOW) {
 		buttons |= A_BUTTON;
 	}
@@ -93,6 +93,16 @@ bool CHGame::nextFrame() {
 	uint32_t currentMillis = millis();
 
 	if (currentMillis - this->lastFrameTime >= this->frameDelay) {
+	Serial.print(currentMillis);
+	Serial.print(" - ");
+	Serial.print(this->lastFrameTime);
+	Serial.print(" = ");
+	Serial.print(currentMillis - this->lastFrameTime);
+	Serial.print(" > ");
+	Serial.print(this->frameDelay);
+	Serial.print("\n ");
+	
+
 		this->lastFrameTime = currentMillis;
 		this->frameCount++;
 		return true;
@@ -102,6 +112,57 @@ bool CHGame::nextFrame() {
 	}
 
 }
+// void CHGame::setFrameRate(uint8_t frameRate) {
+//     this->targetFPS = frameRate;
+//     // Use microseconds (1,000,000 per second) for better 60 FPS accuracy
+//     this->frameDelay = 1000000 / this->targetFPS; // 60 FPS = 16666 micros
+//     this->lastFrameTime = micros();
+// }
+
+// bool CHGame::nextFrame() {
+//     uint32_t currentMicros = micros();
+
+//     if (currentMicros - this->lastFrameTime >= this->frameDelay) {
+// 	Serial.print(currentMicros);
+// 	Serial.print(" - ");
+// 	Serial.print(this->lastFrameTime);
+// 	Serial.print(" = ");
+// 	Serial.print(currentMicros - this->lastFrameTime);
+// 	Serial.print(" > ");
+// 	Serial.print(this->frameDelay);
+// 	Serial.print("\n ");	
+//         // Fixes cumulative drift by maintaining a strict mathematical grid
+//         this->lastFrameTime += this->frameDelay; 
+//         this->frameCount++;
+//         return true;
+//     } 
+//     return false;
+// }
+// bool CHGame::nextFrame() {
+
+//     uint32_t currentMicros = micros();
+//     uint32_t diff = currentMicros - this->lastFrameTime;
+
+//     if (diff >= this->frameDelay) {
+//         // Advanced Fix: Align to the most recent frame boundary.
+//         // This stops it from breaking if a loop takes too long.
+//         uint32_t missedPeriods = (currentMicros - this->lastFrameTime) / this->frameDelay;
+//         this->lastFrameTime += missedPeriods * this->frameDelay;
+        
+//         this->frameCount++;
+// 	Serial.print(currentMicros);
+// 	Serial.print(" - ");
+// 	Serial.print(this->lastFrameTime);
+// 	Serial.print(" = ");
+// 	Serial.print(diff);
+// 	Serial.print(" > ");
+// 	Serial.print(this->frameDelay);
+// 	Serial.print("\n ");			
+//         return true;
+//     } 
+//     return false;
+// }
+
 
 void CHGame::resetFrameCount() { this->frameCount = 0; }
 

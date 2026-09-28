@@ -296,7 +296,7 @@ void setup()
     Gfx.begin(GFX_DIV2, GFX_16BPP);
     Gfx.setPalette(palette, 16);
 
-    chGame.setFrameRate(60);
+    chGame.setFrameRate(5);
     chGame.boot();
 
     // drawStaticScreen();
