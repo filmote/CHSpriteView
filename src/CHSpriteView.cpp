@@ -91,33 +91,33 @@ struct DrawCtx {
     uint8_t   carry[128];      /* one row: 255 px max -> 128 bytes         */
 };
 
-/* Mark [x0,x1) of screen row y as changed, in that row's band. */
-static inline void dirtyAdd(SpriteDirty *d, int x0, int y, int x1)
-{
-    if (!d) return;
-    SpriteRect *r = &d->band[y / SPRITE_BAND_ROWS];
-    if (x0 < r->x0) r->x0 = (int16_t)x0;
-    if (y  < r->y0) r->y0 = (int16_t)y;
-    if (x1 > r->x1) r->x1 = (int16_t)x1;
-    if (y  >= r->y1) r->y1 = (int16_t)(y + 1);
-}
+// /* Mark [x0,x1) of screen row y as changed, in that row's band. */
+// static inline void dirtyAdd(SpriteDirty *d, int x0, int y, int x1)
+// {
+//     if (!d) return;
+//     SpriteRect *r = &d->band[y / SPRITE_BAND_ROWS];
+//     if (x0 < r->x0) r->x0 = (int16_t)x0;
+//     if (y  < r->y0) r->y0 = (int16_t)y;
+//     if (x1 > r->x1) r->x1 = (int16_t)x1;
+//     if (y  >= r->y1) r->y1 = (int16_t)(y + 1);
+// }
 
-void spriteDirtyReset(SpriteDirty &d)
-{
-    for (uint8_t i = 0; i < SPRITE_BANDS; i++) {
-        d.band[i].x0 = d.band[i].y0 = 0x7FFF;
-        d.band[i].x1 = d.band[i].y1 = -1;
-    }
-}
+// void spriteDirtyReset(SpriteDirty &d)
+// {
+//     for (uint8_t i = 0; i < SPRITE_BANDS; i++) {
+//         d.band[i].x0 = d.band[i].y0 = 0x7FFF;
+//         d.band[i].x1 = d.band[i].y1 = -1;
+//     }
+// }
 
 static inline bool rectEmpty(const SpriteRect &r) { return r.x1 <= r.x0 || r.y1 <= r.y0; }
 
-bool spriteDirtyEmpty(const SpriteDirty &d)
-{
-    for (uint8_t i = 0; i < SPRITE_BANDS; i++)
-        if (!rectEmpty(d.band[i])) return false;
-    return true;
-}
+// bool spriteDirtyEmpty(const SpriteDirty &d)
+// {
+//     for (uint8_t i = 0; i < SPRITE_BANDS; i++)
+//         if (!rectEmpty(d.band[i])) return false;
+//     return true;
+// }
 
 /* What flushing r would cost, in bytes of wire time: CHGfx rounds x out to
  * 8 px in 12 bpp (2 px in 16 bpp), then 1.5 or 2 bytes a pixel, plus the
@@ -140,33 +140,33 @@ static uint32_t flushOne(const SpriteRect &r, bool async)
     return (uint32_t)w * (uint32_t)h;
 }
 
-uint32_t spriteFlushDirty(const SpriteDirty &d)
-{
-    /* Greedy, top to bottom: grow the pending rectangle by the next band
-     * whenever their union costs no more than sending them separately;
-     * otherwise send the pending one and start again from this band. */
-    SpriteRect cur;
-    bool have = false;
-    uint32_t px = 0;
-    for (uint8_t i = 0; i < SPRITE_BANDS; i++) {
-        const SpriteRect &b = d.band[i];
-        if (rectEmpty(b)) continue;
-        if (!have) { cur = b; have = true; continue; }
-        SpriteRect u;
-        u.x0 = cur.x0 < b.x0 ? cur.x0 : b.x0;
-        u.y0 = cur.y0;
-        u.x1 = cur.x1 > b.x1 ? cur.x1 : b.x1;
-        u.y1 = b.y1;
-        if (rectCost(u) <= rectCost(cur) + rectCost(b)) {
-            cur = u;
-        } else {
-            px += flushOne(cur, false);
-            cur = b;
-        }
-    }
-    if (have) px += flushOne(cur, true);
-    return px;
-}
+// uint32_t spriteFlushDirty(const SpriteDirty &d)
+// {
+//     /* Greedy, top to bottom: grow the pending rectangle by the next band
+//      * whenever their union costs no more than sending them separately;
+//      * otherwise send the pending one and start again from this band. */
+//     SpriteRect cur;
+//     bool have = false;
+//     uint32_t px = 0;
+//     for (uint8_t i = 0; i < SPRITE_BANDS; i++) {
+//         const SpriteRect &b = d.band[i];
+//         if (rectEmpty(b)) continue;
+//         if (!have) { cur = b; have = true; continue; }
+//         SpriteRect u;
+//         u.x0 = cur.x0 < b.x0 ? cur.x0 : b.x0;
+//         u.y0 = cur.y0;
+//         u.x1 = cur.x1 > b.x1 ? cur.x1 : b.x1;
+//         u.y1 = b.y1;
+//         if (rectCost(u) <= rectCost(cur) + rectCost(b)) {
+//             cur = u;
+//         } else {
+//             px += flushOne(cur, false);
+//             cur = b;
+//         }
+//     }
+//     if (have) px += flushOne(cur, true);
+//     return px;
+// }
 
 /*
  * Copy one row into the framebuffer, touching only what differs.
@@ -251,7 +251,7 @@ static SV_CONSUMER void emitRow(DrawCtx &c, const uint8_t *src)
         uint16_t lo, hi;
         if (rowCopyDiff(dst, src, c.rowBytes, &lo, &hi)) {
             /* byte b covers pixels x + 2b and x + 2b + 1 */
-            dirtyAdd(c.dirty, c.x + 2 * lo, sy, c.x + 2 * hi + 2);
+            // dirtyAdd(c.dirty, c.x + 2 * lo, sy, c.x + 2 * hi + 2);
         }
     } else {
         /* Transparency, odd alignment or horizontal clipping: let CHGfx's
@@ -260,7 +260,7 @@ static SV_CONSUMER void emitRow(DrawCtx &c, const uint8_t *src)
         gfx_blit(src, c.x, sy, w, 1, c.transparent);
         int x0 = c.x < 0 ? 0 : c.x;
         int x1 = c.x + w > GFX_W ? GFX_W : c.x + w;
-        dirtyAdd(c.dirty, x0, sy, x1);
+        // dirtyAdd(c.dirty, x0, sy, x1);
     }
 }
 

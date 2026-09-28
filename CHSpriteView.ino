@@ -125,7 +125,6 @@ static SpriteFile fire[FIRE_FRAMES];   /* 20 bytes each: where every frame lives
 static uint8_t    fireCount = 0;
 static uint8_t    fireIdx   = 0;
 
-static bool useDirtyRect = DEMO_START_RECT;
 static bool use12bpp     = DEMO_START_12BPP;
 static bool capped       = DEMO_START_CAPPED;
 
@@ -335,7 +334,7 @@ void loop()
     //     }
     // }
 
-    if (capped && !chGame.nextFrame()) return;
+    if (!chGame.nextFrame()) return;
 
     /* ---- 1. wait for the previous frame's panel transfer ------------- */
     uint32_t t0 = micros();
@@ -343,9 +342,10 @@ void loop()
     uint32_t t1 = micros();
 
     /* ---- 2. card -> framebuffer, noting which pixels changed --------- */
-    SpriteDirty d;
-    spriteDirtyReset(d);
-    if (spriteDraw(fire[fireIdx], FIRE_X, FIRE_Y, -1, &d) != SPRITE_OK) statErrors++;
+    // SpriteDirty d;
+    // spriteDirtyReset(d);
+    // if (spriteDraw(fire[fireIdx], FIRE_X, FIRE_Y, -1, &d) != SPRITE_OK) statErrors++;
+    if (spriteDraw(fire[fireIdx], FIRE_X, FIRE_Y, -1) != SPRITE_OK) statErrors++;
     uint32_t t2 = micros();
 
     /* ---- 3. framebuffer -> panel, asynchronously ---------------------- */
