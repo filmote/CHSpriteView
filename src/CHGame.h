@@ -19,7 +19,7 @@ class CHGame : public CHGfx  {
 
 		uint8_t targetFPS = 30; 
 		uint16_t frameDelay = 1000 / targetFPS;
-		uint64_t lastFrameTime = 0;
+		uint32_t lastFrameTime = 0;
 
 	public:
 

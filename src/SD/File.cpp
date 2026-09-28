@@ -166,3 +166,11 @@ File::operator bool() {
   return false;
 }
 
+// CHGAME: thin wrapper over SdFile::contiguousRange(), which sdfatlib
+// already had but the Arduino File class never exposed.
+bool File::contiguousRange(uint32_t &firstBlock, uint32_t &lastBlock) {
+  if (!_file) {
+    return false;
+  }
+  return _file->contiguousRange(&firstBlock, &lastBlock);
+}

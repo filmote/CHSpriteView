@@ -338,7 +338,23 @@ namespace SDLib {
 
 
 
-  bool SDClass::begin(uint8_t csPin) {
+  /*
+     CHGAME: both begin() overloads now share mountAt(), which starts at the
+     fastest clock allowed and steps down if the card cannot keep up.
+
+     The stock begin(cs) always ran at SPI_HALF_SPEED (3 MHz on this core)
+     and begin(clock, cs) trusted the requested clock blindly. Here, the
+     card is identified once at ~187 kHz (card.init does that regardless
+     of rate), then the volume is mounted at 24 MHz. Mounting reads the MBR
+     and the FAT boot sector and checks their signatures and geometry, so a
+     card or trace that cannot run that fast fails the mount instead of
+     returning garbage later - and we retry at 12 MHz, then 6 MHz.
+
+     Note for anyone porting old sketches: calling SD.begin() again later
+     re-identifies the card from scratch (tens of milliseconds). Call it
+     once in setup(), never per access.
+  */
+  bool SDClass::mountAt(uint8_t fastestRate, uint8_t csPin) {
     if (root.isOpen()) {
       root.close();
     }
@@ -350,20 +366,34 @@ namespace SDLib {
       Return true if initialization succeeds, false otherwise.
 
     */
-    return card.init(SPI_HALF_SPEED, csPin) &&
-           volume.init(card) &&
-           root.openRoot(volume);
+    // Never step below 6 MHz on our own, but honour a slower explicit request.
+    uint8_t slowest = fastestRate > SPI_QUARTER_SPEED ? fastestRate : SPI_QUARTER_SPEED;
+    for (uint8_t rate = fastestRate; rate <= slowest; rate++) {
+      // Identification itself runs at ~187 kHz whatever `rate` is, so a
+      // missing or dead card fails right here on the first pass - once -
+      // rather than once per clock rate.
+      if (!card.init(rate, csPin)) {
+        return false;
+      }
+      // A failed attempt may have left a garbled MBR/boot sector in the
+      // 512-byte block cache under a valid block number; drop it.
+      SdVolume::cacheClear();
+      if (volume.init(card) && root.openRoot(volume)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool SDClass::begin(uint8_t csPin) {
+    return mountAt(SPI_FULL_SPEED, csPin);
   }
 
   bool SDClass::begin(uint32_t clock, uint8_t csPin) {
-    if (root.isOpen()) {
-      root.close();
-    }
-
-    return card.init(SPI_HALF_SPEED, csPin) &&
-           card.setSpiClock(clock) &&
-           volume.init(card) &&
-           root.openRoot(volume);
+    // Map the requested clock onto the fastest rate ID not above it, then
+    // mount with fall-back from there.
+    card.setSpiClock(clock);
+    return mountAt(card.sckRateId(), csPin);
   }
 
   //call this when a card is removed. It will allow you to insert and initialise a new card.

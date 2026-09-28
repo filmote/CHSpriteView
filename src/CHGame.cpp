@@ -8,7 +8,8 @@ uint8_t previousButtonState = 0;
 
 uint8_t CHGame::buttonsState() {
 
-	uint8_t buttons;
+	uint8_t buttons = 0;
+
 	if (digitalRead(PIN_BTN_A) == LOW) {
 		buttons |= A_BUTTON;
 	}
@@ -89,7 +90,7 @@ void CHGame::setFrameRate(uint8_t frameRate) {
 
 bool CHGame::nextFrame() {
 
-	uint64_t currentMillis = millis();
+	uint32_t currentMillis = millis();
 
 	if (currentMillis - this->lastFrameTime >= this->frameDelay) {
 		this->lastFrameTime = currentMillis;

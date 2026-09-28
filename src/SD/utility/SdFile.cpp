@@ -804,6 +804,39 @@ int16_t SdFile::read(void* buf, uint16_t nbyte) {
     }
     uint16_t n = toRead;
 
+    // CHGAME: multi-block fast path.
+    // The loop below reads one block per iteration, and each block is its
+    // own CMD17 with its own card access latency (typically 0.1-1 ms). When
+    // the request starts on a block boundary and covers two or more whole
+    // blocks, fetch every whole block left in THIS cluster with one CMD18
+    // stream instead. Blocks inside one cluster are always consecutive on
+    // the card, so this needs no FAT lookups; the cluster boundary is
+    // handled by the next loop iteration exactly as before.
+    if (offset == 0 && toRead >= 1024 && type_ != FAT_FILE_TYPE_ROOT16) {
+      uint16_t blocks = toRead >> 9;
+      uint8_t inCluster = vol_->blocksPerCluster_ - vol_->blockOfCluster(curPosition_);
+      if (blocks > inCluster) {
+        blocks = inCluster;
+      }
+      if (blocks >= 2) {
+        // The block cache may hold a newer, not-yet-written copy of one of
+        // these blocks (e.g. after a write). Flush it so the card is current.
+        uint32_t c = SdVolume::cacheBlockNumber_;
+        if (c >= block && c < block + blocks && !SdVolume::cacheFlush()) {
+          return -1;
+        }
+        Sd2Card* card = SdVolume::sdCard_;
+        n = blocks << 9;
+        if (!card->readStart(block) || !card->readStream(dst, n) || !card->readStop()) {
+          return -1;
+        }
+        dst += n;
+        curPosition_ += n;
+        toRead -= n;
+        continue;
+      }
+    }
+
     // amount to be read from current block
     if (n > (512 - offset)) {
       n = 512 - offset;

@@ -52,6 +52,17 @@ namespace SDLib {
       File openNextFile(uint8_t mode = O_RDONLY);
       void rewindDirectory(void);
 
+      // CHGAME: if every cluster of this file follows the previous one on
+      // the card, return true with the raw block (LBA) range that holds it.
+      // Such a file can be read with Sd2Card::readStart()/readStream() or
+      // readBlocksPipelined() - no FAT, no directory, one command - which is
+      // how CHSpriteView streams animation frames. Files copied onto a
+      // freshly formatted card are almost always contiguous, and any file
+      // no bigger than one cluster (usually 32 KB on SDHC) always is.
+      // `lastBlock` is the end of the last CLUSTER, so it can run past the
+      // end of the file; use size() for the real length.
+      bool contiguousRange(uint32_t &firstBlock, uint32_t &lastBlock);
+
       using Print::write;
   };
 
@@ -65,7 +76,16 @@ namespace SDLib {
 
       // my quick&dirty iterator, should be replaced
       SdFile getParentDir(const char *filepath, int *indx);
+
+      // CHGAME: shared body of both begin() overloads - mount at the
+      // fastest rate allowed, stepping down on failure. See SD.cpp.
+      bool mountAt(uint8_t fastestRate, uint8_t csPin);
     public:
+      // CHGAME: the underlying card, for raw streaming reads of contiguous
+      // files (see File::contiguousRange()). Everything that talks to the
+      // card directly must finish (readStop()) before the next File call.
+      Sd2Card &rawCard() { return card; }
+
       // This needs to be called to set up the connection to the SD card
       // before other methods are used.
       bool begin(uint8_t csPin = SD_CHIP_SELECT_PIN);
