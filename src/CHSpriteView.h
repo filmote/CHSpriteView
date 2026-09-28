@@ -1,4 +1,5 @@
 #pragma once
+
 /*
  * CHSpriteView - draw packed 4 bpp sprites from microSD into CHGfx's
  * framebuffer, fast enough to animate from the card every frame.
@@ -15,33 +16,25 @@
  *   then        h rows of ceil(w/2) bytes, 2 px per byte, even x in the
  *               LOW nibble - exactly CHGfx's framebuffer packing, which is
  *               what lets opaque sprites be copied into it byte for byte.
+ *  Load once, draw many (the fast one - use this for animation):
  *
- * ---------------------------------------------------------------------------
- * TWO WAYS TO DRAW
- * ---------------------------------------------------------------------------
- *   1. Load once, draw many (the fast one - use this for animation):
+ *    SpriteFile spriteFiles[16];
+ *    spriteLoad(spriteFiles[i], "FIRE/FIRE_00.BIN");  // in setup()
+ *    ...
+ *    spriteDraw(spriteFiles[frame], 0, 64, -1);       // in loop()
+ *    gfx_flushRectAsync(0, 0, 128, 128);              // The whole screen or only what changed
  *
- *        SpriteFile fire[16];
- *        spriteLoad(fire[i], "FIRE/FIRE_00.BIN");        // in setup()
- *        ...
- *        SpriteDirty d;  spriteDirtyReset(d);
- *        spriteDraw(fire[frame], 0, 64, -1, &d);          // in loop()
- *        spriteFlushDirty(d);                             // only what changed
- *
- *      spriteLoad() opens the file ONCE, finds where it physically lives
- *      on the card, and remembers that (20 bytes). spriteDraw() then never
- *      touches the file system again: one CMD18 streams the blocks straight
- *      in, with the next block arriving by DMA while the previous one is
- *      being copied.
- *
- *   2. drawSpriteFile(path, x, y) - Simon's original one-shot call, kept
- *      for convenience. It does a spriteLoad() + spriteDraw() each time, so
- *      it pays for the directory walk on every call.
- *
+ *  spriteLoad() opens the file ONCE, finds where it physically lives
+ *  on the card, and remembers that (20 bytes). spriteDraw() then never
+ *  touches the file system again: one CMD18 streams the blocks straight
+ *  in, with the next block arriving by DMA while the previous one is
+ *  being copied.
+ * 
  * Call SD.begin() once in setup() before either. Never call it per access.
  */
 #include <CHGfx.h>
 #include "SD/SD.h"
+#include "Enums.h"
 
 /* ------------------------------------------------------------------------ */
 /* Tuning                                                                    */
@@ -130,19 +123,6 @@ struct SpriteRect {
     int16_t x0, y0, x1, y1;
 };
 
-// struct SpriteDirty {
-//     SpriteRect band[SPRITE_BANDS];
-// };
-
-// void spriteDirtyReset(SpriteDirty &d);
-// bool spriteDirtyEmpty(const SpriteDirty &d);
-
-/* Send every dirty part of the framebuffer to the panel and return the
- * number of pixels sent. All rectangles but the last are flushed blocking
- * (the bus is the bottleneck either way); the last is flushed async, so
- * the caller can get on with the next frame's logic while it drains. */
-// uint32_t spriteFlushDirty(const SpriteDirty &d);
-
 /* ------------------------------------------------------------------------ */
 /* API                                                                       */
 /* ------------------------------------------------------------------------ */
@@ -150,15 +130,13 @@ struct SpriteRect {
  * The file is closed again before returning; the SpriteFile is all that is
  * kept. Fails with SPRITE_ERR_FRAGMENTED if the file is not stored in
  * consecutive clusters (re-copy it to a freshly formatted card). */
-int spriteLoad(SpriteFile &s, const char *path);
+int spriteLoad(SpriteFile &spriteFile, const char *path);
 
 /* Draw a loaded sprite into the framebuffer at (x, y).
  *   transparent  -1 = opaque; 0..15 = palette index to leave undrawn.
- *   dirty        optional; grown to cover every pixel that changed.
  * Only touches gfx_fb - call gfx_flush*() yourself afterwards. Waits for
  * any async flush in flight first, because it borrows CHGfx's two 512-byte
  * DMA chunk buffers as landing space for the card data. */
-int spriteDraw(const SpriteFile &s, int x, int y, int transparent = -1);
+int spriteDraw(const SpriteFile &spriteFile, int x, int y, int transparent = -1);
 
-/* Simon's original one-shot API: load + draw in one call. */
-int drawSpriteFile(const char *path, int x, int y, int transparent = -1);
+bool loadAll(SpriteFile (&spriteFiles)[Images::Count]);

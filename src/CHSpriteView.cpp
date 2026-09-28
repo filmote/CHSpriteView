@@ -1,46 +1,5 @@
-/*
- * CHSpriteView.cpp - stream packed 4 bpp sprites from microSD into CHGfx's
- * framebuffer.
- *
- * ===========================================================================
- * WHAT CHANGED FROM THE ORIGINAL, AND WHY
- * ===========================================================================
- * The original read each sprite like this, per frame:
- *
- *     sdBegin()  -> SD.begin(PB11)      <- full card re-initialisation
- *     SD.open(path)                     <- directory walk
- *     sdBegin() / read header / sdEnd()
- *     sdBegin() / read 512 B / sdEnd()  x 8
- *     sdBegin() / close / sdEnd()
- *     gfx_blit() each row
- *
- * sdBegin() re-ran SD.begin() - CMD0, the ACMD41 wake-up loop and a volume
- * mount, all at 250 kHz - eleven times a frame, and SD.begin() then left
- * the bus at 3 MHz. That is where "super slow" came from. In order of
- * impact, this version:
- *
- *  1. Mounts the card ONCE (in setup), at 24 MHz with fall-back.
- *  2. Uses the rewritten SD transport (src/SD/utility/Sd2Card.cpp):
- *     register-level SPI and DMA instead of SPIClass::transfer() per byte.
- *  3. Resolves each file to a raw block address ONCE (spriteLoad), so a
- *     draw never touches the FAT or a directory again.
- *  4. Reads the frame with ONE CMD18 multi-block command, pipelined: DMA
- *     fills one 512-byte buffer while the CPU copies the previous one out.
- *  5. Copies opaque, byte-aligned rows straight into gfx_fb (the file's
- *     packing IS the framebuffer's) instead of calling gfx_blit per row,
- *     and diffs each row while copying, so the caller learns exactly which
- *     rectangle changed and can send only that to the LCD.
- *  6. Skips card blocks that are wholly above or below the screen, and ends
- *     the stream on a block boundary thanks to a small per-sprite tail
- *     cache, so no block is read that is not needed.
- *
- * The removed sdBegin()/sdEnd()/spiClaimForLcd() are not needed any more:
- * the SD transport claims SPI1 from CHGfx and hands it back by itself
- * (busClaim()/busRelease() in Sd2Card.cpp), including waiting out an async
- * flush that is still on the wire.
- * ===========================================================================
- */
 #include "CHSpriteView.h"
+
 
 /* Same SRAM-execution trick as CHGfx and Sd2Card: flash is 3 wait states
  * at 48 MHz, and the row copy/diff below is a tight byte loop. */
@@ -61,7 +20,7 @@
 #endif
 
 /* ------------------------------------------------------------------------ */
-/* Draw context                                                              */
+/* Draw context                                                             */
 /* ------------------------------------------------------------------------ */
 /*
  * The card delivers the file as a flat byte stream in 512-byte blocks; the
@@ -87,37 +46,123 @@ struct DrawCtx {
     uint32_t  endByte;         /* one past the last byte of the last one   */
     bool      direct;          /* opaque byte copy into gfx_fb possible    */
     uint16_t  carryLen;        /* bytes of a split row gathered so far     */
-    // SpriteDirty *dirty;        /* where to accumulate changes (may be null)*/
     uint8_t   carry[128];      /* one row: 255 px max -> 128 bytes         */
 };
 
-// /* Mark [x0,x1) of screen row y as changed, in that row's band. */
-// static inline void dirtyAdd(SpriteDirty *d, int x0, int y, int x1)
-// {
-//     if (!d) return;
-//     SpriteRect *r = &d->band[y / SPRITE_BAND_ROWS];
-//     if (x0 < r->x0) r->x0 = (int16_t)x0;
-//     if (y  < r->y0) r->y0 = (int16_t)y;
-//     if (x1 > r->x1) r->x1 = (int16_t)x1;
-//     if (y  >= r->y1) r->y1 = (int16_t)(y + 1);
-// }
 
-// void spriteDirtyReset(SpriteDirty &d)
-// {
-//     for (uint8_t i = 0; i < SPRITE_BANDS; i++) {
-//         d.band[i].x0 = d.band[i].y0 = 0x7FFF;
-//         d.band[i].x1 = d.band[i].y1 = -1;
-//     }
-// }
+// Render the supplied v(alue) into a character array.  Very low cost ..
 
-static inline bool rectEmpty(const SpriteRect &r) { return r.x1 <= r.x0 || r.y1 <= r.y0; }
+static char *putU32(char *p, uint32_t v) {
 
-// bool spriteDirtyEmpty(const SpriteDirty &d)
-// {
-//     for (uint8_t i = 0; i < SPRITE_BANDS; i++)
-//         if (!rectEmpty(d.band[i])) return false;
-//     return true;
-// }
+    char tmp[10];
+    uint8_t n = 0;
+    do { tmp[n++] = (char)('0' + v % 10); v /= 10; } while (v);
+    while (n) *p++ = tmp[--n];
+    *p = 0;
+    return p;
+    
+}
+
+
+// Concatenate p & s.  Very low cost ..
+
+static char *putStr(char *p, const char *s) {
+
+    while (*s) *p++ = *s++;
+    *p = 0;
+    return p;
+
+}
+
+/* Full-screen message for fatal problems (no card, no frames). */
+
+static void fatal(const char *l1, const char *l2) {
+
+    gfx_clear(Black);
+    gfx_text(4, 50, l1, Colors::Red);
+    if (l2) gfx_text(4, 62, l2, Colors::HUD_TEXT);
+    gfx_text(4, 80, "START = retry", Colors::HUD_DIM);
+    gfx_flush();
+
+}
+
+
+bool loadAll(SpriteFile (&spriteFiles)[Images::Count])
+{
+    /* Mount once. 24 MHz, stepping down to 12/6 MHz only if the card cannot
+     * read its own boot sector reliably at speed. */
+    if (!SD.begin(PIN_SD_CS)) {
+        fatal("SD mount failed", "card? FAT16/32?");
+        // if (Serial) Serial.println(F("SD mount failed"));
+        return false;
+    }
+
+    Sd2Card &card = SD.rawCard();
+
+    /* Resolve every frame to its raw block address, once. */
+    char path[] = "FIRE/FIRE_00.BIN";
+    
+    uint8_t fireCount = 0;
+    int16_t bad = -1;
+    int16_t fragmented = -1;
+
+    for (uint8_t i = 0; i < Images::Count; i++) {
+
+        path[10] = (char)('0' + i / 10);
+        path[11] = (char)('0' + i % 10);
+        int r = spriteLoad(spriteFiles[fireCount], path);
+
+        if      (r == SPRITE_OK) fireCount++;
+        else if (r == SPRITE_ERR_FRAGMENTED) {
+            fragmented = i;
+            break;
+        }
+        else {
+            bad = i;
+            break;
+        }
+
+    }
+
+    if (fragmented > 0) {
+
+        char partA[24];
+        char partB[24];
+        char *ptrA = partA;
+        char *ptrB = partB;
+        ptrA = putStr(ptrA, "FILE_");
+        if (bad < 10) ptrA = putStr(ptrA, "0");
+        putU32(partB, fragmented);
+        ptrA = putStr(ptrA, ptrB);
+        ptrA = putStr(ptrA, ".BIN");
+        fatal("Fragmented file(s)", partA);
+        return false;
+
+    }
+
+    else if (bad >= 0) {
+
+        char partA[24];
+        char partB[24];
+        char *ptrA = partA;
+        char *ptrB = partB;
+        ptrA = putStr(ptrA, "FILE_");
+        if (bad < 10) ptrA = putStr(ptrA, "0");
+        putU32(partB, bad);
+        ptrA = putStr(ptrA, ptrB);
+        ptrA = putStr(ptrA, ".BIN");
+        fatal("Bad file(s)", partA);
+        return false;
+    }
+
+    else if (fireCount == 0) {
+        fatal("No matching images", "/FIRE/FIRE_xx.BIN");
+        return false;
+    }
+
+    return true;
+}
+
 
 /* What flushing r would cost, in bytes of wire time: CHGfx rounds x out to
  * 8 px in 12 bpp (2 px in 16 bpp), then 1.5 or 2 bytes a pixel, plus the
@@ -140,33 +185,6 @@ static uint32_t flushOne(const SpriteRect &r, bool async)
     return (uint32_t)w * (uint32_t)h;
 }
 
-// uint32_t spriteFlushDirty(const SpriteDirty &d)
-// {
-//     /* Greedy, top to bottom: grow the pending rectangle by the next band
-//      * whenever their union costs no more than sending them separately;
-//      * otherwise send the pending one and start again from this band. */
-//     SpriteRect cur;
-//     bool have = false;
-//     uint32_t px = 0;
-//     for (uint8_t i = 0; i < SPRITE_BANDS; i++) {
-//         const SpriteRect &b = d.band[i];
-//         if (rectEmpty(b)) continue;
-//         if (!have) { cur = b; have = true; continue; }
-//         SpriteRect u;
-//         u.x0 = cur.x0 < b.x0 ? cur.x0 : b.x0;
-//         u.y0 = cur.y0;
-//         u.x1 = cur.x1 > b.x1 ? cur.x1 : b.x1;
-//         u.y1 = b.y1;
-//         if (rectCost(u) <= rectCost(cur) + rectCost(b)) {
-//             cur = u;
-//         } else {
-//             px += flushOne(cur, false);
-//             cur = b;
-//         }
-//     }
-//     if (have) px += flushOne(cur, true);
-//     return px;
-// }
 
 /*
  * Copy one row into the framebuffer, touching only what differs.
@@ -203,8 +221,9 @@ static inline uint32_t ldWord(const uint8_t *p, bool half)
     return (uint32_t)h[0] | ((uint32_t)h[1] << 16);    /* little-endian */
 }
 
-static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n,
-                                   uint16_t *lo, uint16_t *hi)
+// static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n,
+//                                    uint16_t *lo, uint16_t *hi)
+static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n)
 {
     if ((((uintptr_t)dst | n) & 3) == 0 && ((uintptr_t)src & 1) == 0) {
         const bool half  = ((uintptr_t)src & 2) != 0;
@@ -217,8 +236,6 @@ static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n,
         uint16_t j = words - 1;
         while (ldWord(src + 4 * j, half) == d[j]) j--;     /* stops at i at the latest */
         for (uint16_t k = i; k <= j; k++) d[k] = ldWord(src + 4 * k, half);
-        *lo = (uint16_t)(4 * i);
-        *hi = (uint16_t)(4 * j + 3);
         return true;
     }
 
@@ -229,8 +246,8 @@ static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n,
     if (i == n) return false;
     uint16_t j = n - 1;
     while (dst[j] == src[j]) j--;
-    *lo = i;
-    *hi = j;
+    // *lo = i;
+    // *hi = j;
     for (uint16_t k = i; k <= j; k++) dst[k] = src[k];
     return true;
 }
@@ -249,10 +266,8 @@ static SV_CONSUMER void emitRow(DrawCtx &c, const uint8_t *src)
          * bytes ARE the framebuffer bytes. */
         uint8_t *dst = gfx_fb + (uint32_t)sy * GFX_FB_STRIDE + (c.x >> 1);
         uint16_t lo, hi;
-        if (rowCopyDiff(dst, src, c.rowBytes, &lo, &hi)) {
-            /* byte b covers pixels x + 2b and x + 2b + 1 */
-            // dirtyAdd(c.dirty, c.x + 2 * lo, sy, c.x + 2 * hi + 2);
-        }
+        // rowCopyDiff(dst, src, c.rowBytes, &lo, &hi));
+        rowCopyDiff(dst, src, c.rowBytes);
     } else {
         /* Transparency, odd alignment or horizontal clipping: let CHGfx's
          * nibble-aware blit handle it, one row at a time. We cannot cheaply
@@ -347,11 +362,11 @@ static bool setupCtx(DrawCtx &c, const SpriteFile &s, int x, int y,
 /* ------------------------------------------------------------------------ */
 /* spriteLoad                                                                */
 /* ------------------------------------------------------------------------ */
-int spriteLoad(SpriteFile &s, const char *path)
+int spriteLoad(SpriteFile &spriteFile, const char *path)
 {
-    s.w = s.h = 0;
-    s.blocks = 0;
-    s.tailLen = 0;
+    spriteFile.w = spriteFile.h = 0;
+    spriteFile.blocks = 0;
+    spriteFile.tailLen = 0;
 
     File f = SD.open(path);
     if (!f) return SPRITE_ERR_FILE_OPEN;
@@ -386,34 +401,34 @@ int spriteLoad(SpriteFile &s, const char *path)
     const uint32_t full = end >> 9;
     const uint16_t rem  = (uint16_t)(end & 511u);
     if (rem == 0) {
-        s.blocks = (uint16_t)full;
+        spriteFile.blocks = (uint16_t)full;
     } else if (rem <= SPRITE_TAIL_MAX && full > 0) {
-        s.blocks = (uint16_t)full;
-        if (!f.seek(full << 9) || f.read(s.tail, rem) != (int)rem) {
+        spriteFile.blocks = (uint16_t)full;
+        if (!f.seek(full << 9) || f.read(spriteFile.tail, rem) != (int)rem) {
             f.close();
             return SPRITE_ERR_TRUNCATED;
         }
-        s.tailLen = (uint8_t)rem;
+        spriteFile.tailLen = (uint8_t)rem;
     } else {
-        s.blocks = (uint16_t)(full + 1);
+        spriteFile.blocks = (uint16_t)(full + 1);
     }
 
     f.close();
-    s.firstBlock = first;
-    s.w = w;
-    s.h = h;
+    spriteFile.firstBlock = first;
+    spriteFile.w = w;
+    spriteFile.h = h;
     return SPRITE_OK;
 }
 
 /* ------------------------------------------------------------------------ */
 /* spriteDraw                                                                */
 /* ------------------------------------------------------------------------ */
-int spriteDraw(const SpriteFile &s, int x, int y, int transparent)
+int spriteDraw(const SpriteFile &spriteFile, int x, int y, int transparent)
 {
-    if (s.w == 0) return SPRITE_ERR_NOT_LOADED;
+    if (spriteFile.w == 0) return SPRITE_ERR_NOT_LOADED;
 
     DrawCtx c;
-    if (!setupCtx(c, s, x, y, transparent)) return SPRITE_OK;
+    if (!setupCtx(c, spriteFile, x, y, transparent)) return SPRITE_OK;
 
     /* Everything below writes gfx_fb, and the card read borrows CHGfx's two
      * 512-byte flush chunk buffers as DMA landing space. Both are only safe
@@ -422,7 +437,7 @@ int spriteDraw(const SpriteFile &s, int x, int y, int transparent)
 
     /* Block range covering [startByte, endByte), limited to what is streamed;
      * anything past the streamed blocks comes from the tail cache. */
-    const uint32_t streamEnd  = (uint32_t)s.blocks << 9;
+    const uint32_t streamEnd  = (uint32_t)spriteFile.blocks << 9;
     const uint32_t startBlk   = c.startByte >> 9;
     const uint32_t wantEnd    = c.endByte < streamEnd ? c.endByte : streamEnd;
     const uint32_t endBlk     = (wantEnd + 511u) >> 9;          /* exclusive */
@@ -432,7 +447,7 @@ int spriteDraw(const SpriteFile &s, int x, int y, int transparent)
     if (nBlk) {
         uint8_t *buf0 = gfx_chunkScratch();
         uint8_t *buf1 = buf0 + GFX_CHUNK_BYTES;
-        if (!SD.rawCard().readBlocksPipelined(s.firstBlock + startBlk, nBlk,
+        if (!SD.rawCard().readBlocksPipelined(spriteFile.firstBlock + startBlk, nBlk,
                                               buf0, buf1, onBlock, &c)) {
             return SPRITE_ERR_IO;
         }
@@ -440,58 +455,18 @@ int spriteDraw(const SpriteFile &s, int x, int y, int transparent)
 
     /* Bytes beyond the last streamed block, from RAM. consume() ignores
      * them if the visible range ended earlier. */
-    if (s.tailLen && c.endByte > streamEnd) {
+    if (spriteFile.tailLen && c.endByte > streamEnd) {
         c.off = streamEnd;
-        consume(c, s.tail, s.tailLen);
+        consume(c, spriteFile.tail, spriteFile.tailLen);
     }
     return SPRITE_OK;
 }
 
-/* ------------------------------------------------------------------------ */
-/* drawSpriteFile - Simon's original one-shot API                            */
-/* ------------------------------------------------------------------------ */
-/* Fallback for fragmented files: the ordinary File API into one of the
- * chunk buffers, fed through the same row consumer. Slower (FAT lookups,
- * one command per block) but still correct and still zero-copy per row. */
-// static int drawViaFileApi(const char *path, int x, int y, int transparent)
-// {
-//     File f = SD.open(path);
-//     if (!f) return SPRITE_ERR_FILE_OPEN;
+int drawSpriteFile(const char *path, int x, int y, int transparent) {
 
-//     uint8_t header[SPRITE_HEADER_BYTES];
-//     if (f.read(header, SPRITE_HEADER_BYTES) != SPRITE_HEADER_BYTES) {
-//         f.close();
-//         return SPRITE_ERR_HEADER_READ;
-//     }
-//     SpriteFile s;
-//     s.w = header[0];
-//     s.h = header[1];
-//     s.tailLen = 0;
-//     if (s.w == 0 || s.h == 0) { f.close(); return SPRITE_ERR_BAD_DIMENSIONS; }
-
-//     DrawCtx c;
-//     if (!setupCtx(c, s, x, y, transparent)) { f.close(); return SPRITE_OK; }
-
-//     gfx_wait();
-//     uint8_t *buf = gfx_chunkScratch();
-//     c.off = c.startByte;
-//     if (!f.seek(c.startByte)) { f.close(); return SPRITE_ERR_TRUNCATED; }
-//     while (c.off < c.endByte) {
-//         uint32_t want = c.endByte - c.off;
-//         if (want > 512) want = 512;
-//         int got = f.read(buf, (uint16_t)want);
-//         if (got <= 0) { f.close(); return SPRITE_ERR_TRUNCATED; }
-//         consume(c, buf, (uint32_t)got);
-//     }
-//     f.close();
-//     return SPRITE_OK;
-// }
-
-int drawSpriteFile(const char *path, int x, int y, int transparent)
-{
     SpriteFile s;
     int r = spriteLoad(s, path);
-    // if (r == SPRITE_ERR_FRAGMENTED) return drawViaFileApi(path, x, y, transparent);
     if (r != SPRITE_OK) return r;
     return spriteDraw(s, x, y, transparent);
+
 }
