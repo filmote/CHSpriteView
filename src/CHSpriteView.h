@@ -6,8 +6,8 @@
 
 /* Bytes read from the card per fileRead() call. As many whole rows as fit
  * are read at once and blitted before the next read, instead of one row
- * per SD access -- sdBegin() re-runs SD.begin() every call, which is the
- * real cost, so cutting how often it happens is what actually buys speed.
+ * per SD access, so the sdBegin()/sdEnd() hand-off (and the SD read
+ * itself) happens far less often.
  * Must be at least as big as one row (GFX_W/2 = 64 bytes covers any width
  * up to a full screen). Override before including this header, e.g.
  * `#define SPRITE_BUF_SIZE 1024` -- bigger trades RAM for fewer reads. */
@@ -42,6 +42,7 @@ enum SpriteResult {
 void spiClaimForLcd(void);
 void sdBegin(void);
 void sdEnd(void);
+void sdSeek(File &file, uint64_t pos);
 
 /* Reads a packed 4bpp sprite from `path` and blits it into the CHGfx
  * framebuffer at (x, y).
@@ -62,5 +63,30 @@ void sdEnd(void);
  * Returns 0 (SPRITE_OK) on success, or a negative error code on failure.
  * SPRITE_ERR_TOO_WIDE means the sprite's row doesn't fit in SPRITE_BUF_SIZE
  * bytes -- raise that constant, or narrow the sprite. */
+/* --- By path: the file is opened and closed for you ---------------- */
 int drawSpriteFile(const char *path, int x, int y, int transparentIndex = -1);
 int drawSpriteFile(const char *path, int x, int y, int w, int h, int transparentIndex = -1);
+int drawSpriteFile_WithBuff(const char *path, int x, int y, int transparentIndex = -1, uint8_t *buf = nullptr);
+int drawSpriteFile_WithBuff(const char *path, int x, int y, int w, int h, int transparentIndex = -1, uint8_t *buf = nullptr);
+
+/* --- By open File: pass a pointer to a File you've already opened --------
+ * The file is NOT closed afterwards, and reading starts at its current
+ * position (no seek), so a sprite can sit at an offset inside a larger
+ * file, and consecutive calls walk through packed sprites. If the data
+ * has no header, pass w and h; for a header, use the short form. A File
+ * that isn't open returns SPRITE_ERR_FILE_OPEN. */
+int drawSpriteFile(File *file, int x, int y, int w, int h, uint8_t idx, int transparentIndex = -1);
+int drawSpriteFile_WithBuff(File *file, int x, int y, int w, int h, uint8_t idx, int transparentIndex = -1, uint8_t *buf = nullptr);
+
+/* buf (full forms only): your own working buffer, declared as
+ * `uint8_t buf[SPRITE_BUF_SIZE];`, so it needn't be allocated on the stack
+ * per call. nullptr (default) uses an internal stack buffer of that size.
+ * To pass a buffer with a headered sprite, use w = -1, h = -1.
+ *
+ * Examples:
+ *   drawSpriteFile("/a.bin", 0, 0, -1);                                    // path, header in file (-1 transparent color)
+ *   drawSpriteFile("/a.bin", 0, 0, 16, 16, -1);                            // path, no dimensions header in file (16x16 image, -1 transparent color)
+ *   drawSpriteFile_WithBuff("/a.bin", 0, 0, -1, gBuff);                    // path, header in file (-1 transparent color)
+ *   drawSpriteFile_WithBuff("/a.bin", 0, 0, 16, 16, -1, gBuff);            // path, no dimensions header in file (16x16 image, -1 transparent color)
+ *   drawSpriteFile(&f, 0, 0, 16, 16, 0, -1);                               // open file, no dimensions header in file (16x16 image, -1 transparent color)
+ *   drawSpriteFile_WithBuff(&f, 0, 0, 16, 16, 0, -1, myBuf);               // open file, no dimensions header in file (16x16 image, -1 transparent color)

@@ -2,10 +2,9 @@
 #include "src/CHGame.h"
 #include "src/CHSpriteView.h"
 
-#define DEBUG_RENDER
-enum Colors : uint8_t { Transparent, Blue, White, Red, Navy,
-                 BLANK_2, BLANK_3, BLANK_4, BLANK_5, BLANK_6,
-                 BLANK_7, BLANK_8, BLANK_9, BLANK_10, BLANK_11, Black };
+enum Colors { Transparent, Blue, White, Red, Navy,
+              BLANK_2, BLANK_3, BLANK_4, BLANK_5, BLANK_6,
+              BLANK_7, BLANK_8, BLANK_9, BLANK_10, BLANK_11, Black };
 
 static const uint16_t palette[16] = {
     0x0000, 0x0001, 0x0020, 0xF949, 0xF128,
@@ -38,8 +37,9 @@ static const uint8_t Sprite_InMem[] PROGMEM
 
 CHGame chGame;
 uint8_t fire_Idx = 0;
-char fileName[] = "FIRE/FIRE_00.BIN";
 uint32_t prevTime;
+
+uint8_t gBuf[SPRITE_BUF_SIZE];
 
 void setup()
 {
@@ -57,6 +57,13 @@ void setup()
     prevTime = millis();
 }
 
+#define _TEST_NF_1
+#define _TEST_NF_2
+#define _TEST_NF_3
+#define _TEST_NF_4
+#define TEST_EF_1
+#define _TEST_EF_2
+
 void loop()
 {
     // if (!chGame.nextFrame()) return;
@@ -68,13 +75,63 @@ void loop()
     Gfx.clear(Colors::Black);
     chGame.pollButtons();
 
-    //                 012345678901
-    fileName[10] = 48 + fire_Idx / 10;
-    fileName[11] = 48 + fire_Idx % 10;
+    // Approx 113 - 129 millisecongs / 7.75 to 8.80 fps
+    #if defined(TEST_NF_1)
+        //                 012345678901
+        char fileName[] = "WHEI/FIRE_00.BIN";
+        fileName[10] = 48 + fire_Idx / 10;
+        fileName[11] = 48 + fire_Idx % 10;
 
-    drawSpriteFile(fileName, 0, 64, 128, 64, 0);
+        drawSpriteFile(fileName, 0, 64, Colors::Transparent);
 
-    Gfx.drawSprite(Sprite_InMem, 0, 0, 16, 16, 0);
+    // Approx 105 - 120 milliseconds / 8.33 9.52 tfps
+    #elif defined(TEST_NF_2)
+        //                 012345678901
+        char fileName[] = "FIRE/FIRE_00.BIN";
+        fileName[10] = 48 + fire_Idx / 10;
+        fileName[11] = 48 + fire_Idx % 10;
+
+        drawSpriteFile(fileName, 0, 64, 128, 64, Colors::Transparent);
+
+    // Approx 114 - 130 milliseconds / 7.69 to 8.80 fps
+    #elif defined(TEST_NF_3)
+        //                 012345678901
+        char fileName[] = "WHEI/FIRE_00.BIN";
+        fileName[10] = 48 + fire_Idx / 10;
+        fileName[11] = 48 + fire_Idx % 10;
+
+        drawSpriteFile_WithBuff(fileName, 0, 64, Colors::Transparent, gBuf);
+
+    // Approx 103 - 119 milliseconds / 9.53 to 8.33 fps
+    #elif defined(TEST_NF_4)
+        //                 012345678901
+        char fileName[] = "FIRE/FIRE_00.BIN";
+        fileName[10] = 48 + fire_Idx / 10;
+        fileName[11] = 48 + fire_Idx % 10;
+
+        drawSpriteFile_WithBuff(fileName, 0, 64, 128, 64, Colors::Transparent, gBuf);
+
+    // Approx 127 - 135 milliseconds / 7.41 to 7.87 fps
+    #elif defined(TEST_EF_1)
+
+        sdBegin();
+        File f = SD.open("/FIRE/FIRE.BIN");
+        sdEnd();
+
+        drawSpriteFile(&f, 0, 64, 128, 64, fire_Idx, Colors::Transparent);
+
+    // Approx 127 - 135 milliseconds / 7.41 to 7.87 fps
+    #elif defined(TEST_EF_2)
+
+        sdBegin();
+        File f = SD.open("/FIRE/FIRE.BIN");
+        sdEnd();
+
+        drawSpriteFile_WithBuff(&f, 0, 64, 128, 64, fire_Idx, Colors::Transparent, gBuf);
+
+    #endif
+
+    // Gfx.drawSprite(Sprite_InMem, 0, 0, 16, 16, Colors::Transparent);
     Gfx.display();                
 
     fire_Idx++;
