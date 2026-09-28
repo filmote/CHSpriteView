@@ -90,3 +90,4 @@ int drawSpriteFile_WithBuff(File *file, int x, int y, int w, int h, uint8_t idx,
  *   drawSpriteFile_WithBuff("/a.bin", 0, 0, 16, 16, -1, gBuff);            // path, no dimensions header in file (16x16 image, -1 transparent color)
  *   drawSpriteFile(&f, 0, 0, 16, 16, 0, -1);                               // open file, no dimensions header in file (16x16 image, -1 transparent color)
  *   drawSpriteFile_WithBuff(&f, 0, 0, 16, 16, 0, -1, myBuf);               // open file, no dimensions header in file (16x16 image, -1 transparent color)
+*/
