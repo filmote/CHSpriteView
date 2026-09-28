@@ -43,13 +43,14 @@ void spiClaimForLcd(void);
 void sdBegin(void);
 void sdEnd(void);
 
-/* Reads a packed 4bpp sprite with a 2-byte header (width, height) from `path` 
- * and blits it into the CHGfx framebuffer at (x, y). 
+/* Reads a packed 4bpp sprite from `path` and blits it into the CHGfx
+ * framebuffer at (x, y).
  *
- * File header structure:
- * - Byte 0: Width (w)
- * - Byte 1: Height (h)
- * Followed by h rows of ceil(w/2) bytes.
+ * If w and h are left at their default (-1), the file is expected to
+ * carry a 2-byte header -- byte 0 width, byte 1 height -- and that header
+ * is read and used. If both w and h are passed in (> 0), the header read
+ * is skipped entirely and the file is treated as raw, headerless rows:
+ * h rows of ceil(w/2) bytes, nothing else.
  *
  * Nothing is sent to the LCD here -- this only touches the in-RAM
  * framebuffer (gfx_blit). Call gfx_flush() yourself once you're done
@@ -62,3 +63,4 @@ void sdEnd(void);
  * SPRITE_ERR_TOO_WIDE means the sprite's row doesn't fit in SPRITE_BUF_SIZE
  * bytes -- raise that constant, or narrow the sprite. */
 int drawSpriteFile(const char *path, int x, int y, int transparentIndex = -1);
+int drawSpriteFile(const char *path, int x, int y, int w, int h, int transparentIndex = -1);

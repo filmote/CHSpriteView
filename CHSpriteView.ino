@@ -39,21 +39,30 @@ static const uint8_t Sprite_InMem[] PROGMEM
 CHGame chGame;
 uint8_t fire_Idx = 0;
 char fileName[] = "FIRE/FIRE_00.BIN";
+uint32_t prevTime;
 
 void setup()
 {
     Gfx.begin();                    // 24 MHz SPI, 16 bpp output
+
+    if (!SD.begin(24000000UL, PIN_SD_CS)) SD.begin(PIN_SD_CS);
+    spiClaimForLcd();
+
     Gfx.setPalette(palette, 16);
 
     chGame.setFrameRate(60);
     chGame.boot();
 
     Gfx.display();                  // one DMA burst, ~11 ms
+    x = millis();
 }
 
 void loop()
 {
-    if (!chGame.nextFrame()) return;
+    // if (!chGame.nextFrame()) return;
+    uint32_t currTime = millis();
+    Serial.println(currTime - prevTime);
+    prevTime = currTime;
 
     // Gfx.wait();
     Gfx.clear(Colors::Black);
@@ -63,7 +72,7 @@ void loop()
     fileName[10] = 48 + fire_Idx / 10;
     fileName[11] = 48 + fire_Idx % 10;
 
-    drawSpriteFile(fileName, 0, 64, 0);
+    drawSpriteFile(fileName, 0, 64, 128, 64, 0);
 
     Gfx.drawSprite(Sprite_InMem, 0, 0, 16, 16, 0);
     Gfx.display();                

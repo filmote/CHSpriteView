@@ -69,7 +69,7 @@ bool CHGame::justPressed(uint8_t buttons) {
 }
 
 bool CHGame::justReleased(uint8_t buttons) {
-	return (!(previousButtonState & buttons) && !(currentButtonState & buttons));
+	return (((previousButtonState & buttons) != 0) && ((currentButtonState & buttons) == 0));
 }
 
 void CHGame::pollButtons() {

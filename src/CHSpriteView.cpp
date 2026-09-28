@@ -1,6 +1,9 @@
 /*
- * spriteview.cpp - reads a headered, packed-4bpp sprite file off the SD
- * card and blits it into CHGfx's framebuffer, one row at a time.
+ * spriteview.cpp - reads a packed-4bpp sprite file off the SD card and
+ * blits it into CHGfx's framebuffer, in buffered chunks of rows. The file
+ * either carries a 2-byte (width, height) header, or the caller passes
+ * the size in and the file is read as raw, headerless rows -- see
+ * drawSpriteFile()'s doc comment in the header.
  *
  * Reading a row at a time (instead of the whole sprite into RAM) means a
  * full 128x128 sprite costs a 64-byte stack buffer, not an 8 KB one --
@@ -30,7 +33,7 @@ void spiClaimForLcd(void)
     SPI1->CTLR1 |= SPI_SPE;
 }
 
-void sdBegin(void) { /*gfx_wait(); */SD.begin(PB11); }
+void sdBegin(void) { gfx_wait(); }
 void sdEnd(void)   { spiClaimForLcd(); }
 
 static bool fileOpen(File &f, const char *path)
@@ -56,21 +59,33 @@ static bool fileRead(File &f, uint8_t *dst, size_t n)
     return ok;
 }
 
-int drawSpriteFile(const char *path, int x, int y, int transparentIndex)
+int drawSpriteFile(const char *path, int x, int y, int transparentIndex) {
+
+    return drawSpriteFile(path, x, y, -1, -1, transparentIndex);
+
+}
+
+int drawSpriteFile(const char *path, int x, int y, int w, int h, int transparentIndex)
 {
     File f;
     if (!fileOpen(f, path)) {
         return SPRITE_ERR_FILE_OPEN;
     }
 
-    uint8_t header[2];
-    if (!fileRead(f, header, 2)) {
-        fileClose(f);
-        return SPRITE_ERR_HEADER_READ;
+    // Retrieve the width and height from images?
+    
+    if (w <= 0 || h <= 0) {
+        /* No size given -- the file must carry the 2-byte header. */
+        uint8_t header[2];
+        if (!fileRead(f, header, 2)) {
+            fileClose(f);
+            return SPRITE_ERR_HEADER_READ;
+        }
+        w = header[0];
+        h = header[1];
     }
-
-    const int w = header[0];
-    const int h = header[1];
+    /* else: size was passed in, so the file is treated as raw rows with
+     * no header at all -- nothing has been read from it yet. */
 
     if (w <= 0 || h <= 0) {
         fileClose(f);
