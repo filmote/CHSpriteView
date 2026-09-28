@@ -58,10 +58,10 @@ void setup()
 }
 
 #define _TEST_NF_1
-#define _TEST_NF_2
+#define TEST_NF_2
 #define _TEST_NF_3
 #define _TEST_NF_4
-#define TEST_EF_1
+#define _TEST_EF_1
 #define _TEST_EF_2
 
 void loop()
@@ -75,7 +75,8 @@ void loop()
     Gfx.clear(Colors::Black);
     chGame.pollButtons();
 
-    // Approx 113 - 129 millisecongs / 7.75 to 8.80 fps
+    // Opens a file based on file name, determines W and H from file ..
+    // Approx 113 - 129 milliseconds / 7.75 to 8.80 fps
     #if defined(TEST_NF_1)
         //                 012345678901
         char fileName[] = "WHEI/FIRE_00.BIN";
@@ -84,6 +85,7 @@ void loop()
 
         drawSpriteFile(fileName, 0, 64, Colors::Transparent);
 
+    // Opens a file based on file name, W and H passed explicilty ..
     // Approx 105 - 120 milliseconds / 8.33 9.52 tfps
     #elif defined(TEST_NF_2)
         //                 012345678901
@@ -93,6 +95,7 @@ void loop()
 
         drawSpriteFile(fileName, 0, 64, 128, 64, Colors::Transparent);
 
+    // Opens a file based on file name, determines W and H from file, uses a global buffer for reading SD data ..
     // Approx 114 - 130 milliseconds / 7.69 to 8.80 fps
     #elif defined(TEST_NF_3)
         //                 012345678901
@@ -102,6 +105,7 @@ void loop()
 
         drawSpriteFile_WithBuff(fileName, 0, 64, Colors::Transparent, gBuf);
 
+    // Opens a file based on file name, W and H passed explicilty, uses a global buffer for reading SD data ..
     // Approx 103 - 119 milliseconds / 9.53 to 8.33 fps
     #elif defined(TEST_NF_4)
         //                 012345678901
@@ -111,6 +115,7 @@ void loop()
 
         drawSpriteFile_WithBuff(fileName, 0, 64, 128, 64, Colors::Transparent, gBuf);
 
+    // Uses globally openned file and seeks the starting position of file, W and H passed explicilty ..
     // Approx 127 - 135 milliseconds / 7.41 to 7.87 fps
     #elif defined(TEST_EF_1)
 
@@ -120,6 +125,7 @@ void loop()
 
         drawSpriteFile(&f, 0, 64, 128, 64, fire_Idx, Colors::Transparent);
 
+    // Uses globally openned file and seeks the starting position of file, W and H passed explicilty, uses a global buffer for reading SD data ..
     // Approx 127 - 135 milliseconds / 7.41 to 7.87 fps
     #elif defined(TEST_EF_2)
 
