@@ -54,7 +54,7 @@ void setup()
     chGame.boot();
 
     Gfx.display();                  // one DMA burst, ~11 ms
-    currTime = millis();
+    prevTime = millis();
 }
 
 void loop()
