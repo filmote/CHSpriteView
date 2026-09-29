@@ -163,29 +163,6 @@ bool loadAll(SpriteFile (&spriteFiles)[Images::Count])
     return true;
 }
 
-
-/* What flushing r would cost, in bytes of wire time: CHGfx rounds x out to
- * 8 px in 12 bpp (2 px in 16 bpp), then 1.5 or 2 bytes a pixel, plus the
- * fixed per-rectangle overhead. */
-static uint32_t rectCost(const SpriteRect &r)
-{
-    const bool b12 = gfx_colorMode() == GFX_12BPP;
-    const int  a   = b12 ? 8 : 2;
-    const int  x0  = r.x0 & ~(a - 1);
-    const int  x1  = (r.x1 + a - 1) & ~(a - 1);
-    const uint32_t px = (uint32_t)(x1 - x0) * (uint32_t)(r.y1 - r.y0);
-    return (b12 ? px * 3u / 2u : px * 2u) + SPRITE_RECT_OVERHEAD_BYTES;
-}
-
-static uint32_t flushOne(const SpriteRect &r, bool async)
-{
-    const int w = r.x1 - r.x0, h = r.y1 - r.y0;
-    if (async) gfx_flushRectAsync(r.x0, r.y0, w, h);
-    else       gfx_flushRect(r.x0, r.y0, w, h);
-    return (uint32_t)w * (uint32_t)h;
-}
-
-
 /*
  * Copy one row into the framebuffer, touching only what differs.
  *
