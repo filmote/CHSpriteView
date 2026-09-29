@@ -140,3 +140,63 @@ int spriteLoad(SpriteFile &spriteFile, const char *path);
 int spriteDraw(const SpriteFile &spriteFile, int x, int y, int transparent = -1);
 
 bool loadAll(SpriteFile (&spriteFiles)[Images::Count]);
+
+/* --------------------------------------------------------------------- */
+/* SPI1 arbitration                                                       */
+/* --------------------------------------------------------------------- */
+/*
+* The ST7735 and the microSD share SPI1 and want it configured differently.
+* The SD side is self-healing: SPIClass::beginTransaction() calls spi_init(),
+* which resets and reprograms SPI1 before every card operation. The LCD side
+* is not, so spiClaimForLcd() puts the register back the way CHGfx's own
+* spiInit() leaves it. Wrap every SD access in sdBegin()/sdEnd().
+*
+* sdBegin() waits for any in-flight frame DMA first: that DMA owns the bus,
+* and the card would otherwise reprogram the peripheral out from under it.
+*/
+void spiClaimForLcd(void);
+void sdBegin(void);
+void sdEnd(void);
+void sdSeek(File &file, uint64_t pos);
+
+/* Reads a packed 4bpp sprite from `path` and blits it into the CHGfx
+ * framebuffer at (x, y).
+ *
+ * If w and h are left at their default (-1), the file is expected to
+ * carry a 2-byte header -- byte 0 width, byte 1 height -- and that header
+ * is read and used. If both w and h are passed in (> 0), the header read
+ * is skipped entirely and the file is treated as raw, headerless rows:
+ * h rows of ceil(w/2) bytes, nothing else.
+ *
+ * Nothing is sent to the LCD here -- this only touches the in-RAM
+ * framebuffer (gfx_blit). Call gfx_flush() yourself once you're done
+ * drawing everything for the frame.
+ *
+ * transparentIndex: -1 (default) draws opaque; 0-15 skips pixels of that
+ * palette index instead of drawing them.
+ *
+ * Returns 0 (SPRITE_OK) on success, or a negative error code on failure.
+ * SPRITE_ERR_TOO_WIDE means the sprite's row doesn't fit in SPRITE_BUF_SIZE
+ * bytes -- raise that constant, or narrow the sprite. */
+/* --- By path: the file is opened and closed for you ---------------- */
+int drawSpriteFile(const char *path, int x, int y, int transparentIndex = -1);
+int drawSpriteFile(const char *path, int x, int y, int w, int h, int transparentIndex = -1);
+
+/* --- By open File: pass a pointer to a File you've already opened --------
+ * The file is NOT closed afterwards, and reading starts at its current
+ * position (no seek), so a sprite can sit at an offset inside a larger
+ * file, and consecutive calls walk through packed sprites. If the data
+ * has no header, pass w and h; for a header, use the short form. A File
+ * that isn't open returns SPRITE_ERR_FILE_OPEN. */
+int drawSpriteFile(File *file, int x, int y, int w, int h, uint8_t idx, int transparentIndex = -1);
+
+/* buf (full forms only): your own working buffer, declared as
+ * `uint8_t buf[SPRITE_BUF_SIZE];`, so it needn't be allocated on the stack
+ * per call. nullptr (default) uses an internal stack buffer of that size.
+ * To pass a buffer with a headered sprite, use w = -1, h = -1.
+ *
+ * Examples:
+ *   drawSpriteFile("/a.bin", 0, 0, -1);                                    // path, header in file (-1 transparent color)
+ *   drawSpriteFile("/a.bin", 0, 0, 16, 16, -1);                            // path, no dimensions header in file (16x16 image, -1 transparent color)
+ *   drawSpriteFile(&f, 0, 0, 16, 16, 0, -1);                               // open file, no dimensions header in file (16x16 image, -1 transparent color)
+ */

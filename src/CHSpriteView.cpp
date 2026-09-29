@@ -11,13 +11,15 @@
  * in flash 231 fps (within noise), and flash saves 516 bytes of RAM. Only
  * the per-byte loop, rowCopyDiff, earns its place in SRAM. */
 #ifndef SPRITE_CONSUMER_IN_RAM
-#define SPRITE_CONSUMER_IN_RAM 0
+    #define SPRITE_CONSUMER_IN_RAM 0
 #endif
 #if SPRITE_CONSUMER_IN_RAM
-  #define SV_CONSUMER SV_RAMFUNC
+    #define SV_CONSUMER SV_RAMFUNC
 #else
-  #define SV_CONSUMER
+    #define SV_CONSUMER
 #endif
+
+#define SPRITE_BUF_SIZE 512
 
 /* ------------------------------------------------------------------------ */
 /* Draw context                                                             */
@@ -36,6 +38,7 @@
  *   | header   | rows above screen   | visible rows ...    | rows below |
  */
 struct DrawCtx {
+
     const SpriteFile *s;
     int       x, y;            /* screen position of the sprite            */
     int       transparent;     /* -1 opaque, else skipped palette index    */
@@ -47,6 +50,7 @@ struct DrawCtx {
     bool      direct;          /* opaque byte copy into gfx_fb possible    */
     uint16_t  carryLen;        /* bytes of a split row gathered so far     */
     uint8_t   carry[128];      /* one row: 255 px max -> 128 bytes         */
+
 };
 
 
@@ -93,7 +97,6 @@ bool loadAll(SpriteFile (&spriteFiles)[Images::Count])
      * read its own boot sector reliably at speed. */
     if (!SD.begin(PIN_SD_CS)) {
         fatal("SD mount failed", "card? FAT16/32?");
-        // if (Serial) Serial.println(F("SD mount failed"));
         return false;
     }
 
@@ -439,11 +442,165 @@ int spriteDraw(const SpriteFile &spriteFile, int x, int y, int transparent)
     return SPRITE_OK;
 }
 
-int drawSpriteFile(const char *path, int x, int y, int transparent) {
 
-    SpriteFile s;
-    int r = spriteLoad(s, path);
-    if (r != SPRITE_OK) return r;
-    return spriteDraw(s, x, y, transparent);
 
+
+// ----------------------------------------------------------------------
+// Following is for drawing one sprite at a time ..
+
+
+/* --------------------------------------------------------------------- */
+/* SPI1 arbitration                                                      */
+/* --------------------------------------------------------------------- */
+
+#define SPI_MSTR (1u << 2)
+#define SPI_SPE  (1u << 6)
+#define SPI_SSI  (1u << 8)
+#define SPI_SSM  (1u << 9)
+
+/* Master, mode 0, software NSS held high, MSB first, 8-bit frames, BR = 000
+ * (HCLK/2 = 24 MHz, the chip's ceiling and what gfx_begin(GFX_DIV2) asks for).
+ * CTLR2 is cleared so the SD side cannot leave TXDMAEN or SSOE asserted;
+ * CHGfx sets TXDMAEN itself per transfer and flips DFF as it needs it. */
+void spiClaimForLcd(void)
+{
+    SPI1->CTLR1  = 0;
+    SPI1->CTLR2  = 0;
+    SPI1->CTLR1  = SPI_MSTR | SPI_SSM | SPI_SSI;
+    SPI1->CTLR1 |= SPI_SPE;
+}
+
+void sdBegin(void) { gfx_wait(); }
+void sdEnd(void)   { spiClaimForLcd(); }
+
+static bool fileOpen(File &f, const char *path) {
+
+    sdBegin();
+    f = SD.open(path);
+    sdEnd();
+    return (bool)f;
+
+}
+
+static void fileClose(File &f) {
+
+    sdBegin();
+    f.close();
+    sdEnd();
+
+}
+
+static void sdSeek(File *file, uint64_t pos) {
+
+    File *f = file;
+    sdBegin();
+    f->seek(pos);
+    sdEnd();
+
+}
+
+static bool fileRead(File &f, uint8_t *dst, size_t n) {
+
+    sdBegin();
+    const bool ok = ((size_t)f.read(dst, n) == n);
+    sdEnd();
+    return ok;
+
+}
+
+/* Does the actual work on an already-open file, using a caller-supplied
+ * buffer of SPRITE_BUF_SIZE bytes. Never opens or closes anything, so
+ * every error path can simply return. Reads from the file's current
+ * position. */
+static int drawSpriteCore(File &f, int x, int y, int w, int h, int transparentIndex, uint8_t *buf) {
+
+    if (w <= 0 || h <= 0) {
+        /* No size given -- the file must carry the 2-byte header. */
+        uint8_t header[2];
+        if (!fileRead(f, header, 2)) {
+            return SPRITE_ERR_HEADER_READ;
+        }
+        w = header[0];
+        h = header[1];
+    }
+    /* else: size was passed in, so the data is treated as raw rows with
+     * no header at all. */
+
+    if (w <= 0 || h <= 0) {
+        return SPRITE_ERR_BAD_DIMENSIONS;
+    }
+
+    const size_t rowBytes = (size_t)(w + 1) / 2;
+    if (rowBytes > SPRITE_BUF_SIZE) {
+        return SPRITE_ERR_TOO_WIDE;
+    }
+
+    /* gfx_blit()'s signature always takes transparent as an int:
+     *   void gfx_blit(const uint8_t *spr, int x, int y, int w, int h, int transparent);
+     * -1 is assumed to mean "opaque, no transparent colour". */
+    const int rowsPerRead = SPRITE_BUF_SIZE / rowBytes; /* >= 1, checked above */
+
+    int row = 0;
+    while (row < h) {
+        const int rowsThisRead = (rowsPerRead < h - row) ? rowsPerRead : (h - row);
+        const size_t bytesThisRead = rowsThisRead * rowBytes;
+
+        if (!fileRead(f, buf, bytesThisRead)) {
+            return SPRITE_ERR_TRUNCATED;
+        }
+        for (int i = 0; i < rowsThisRead; i++) {
+            gfx_blit(buf + (size_t)i * rowBytes, x, y + row + i, w, 1, transparentIndex);
+        }
+        row += rowsThisRead;
+    }
+
+    return SPRITE_OK;
+}
+
+
+/* Shared body for every public overload. If `file` is non-null it is used
+ * as-is (and left open); otherwise `path` is opened and closed here. */
+static int drawSpriteImpl(File *file, const char *path, int x, int y, int w, int h, int transparentIndex) {
+
+    File local;
+    File *f = file;
+
+    if (f) {
+        if (!(*f)) {
+            return SPRITE_ERR_FILE_OPEN;
+        }
+    } else {
+        if (!path || !fileOpen(local, path)) {
+            return SPRITE_ERR_FILE_OPEN;
+        }
+        f = &local;
+    }
+
+    uint8_t buf[SPRITE_BUF_SIZE];
+    int result = drawSpriteCore(*f, x, y, w, h, transparentIndex, buf);
+
+    // const int result = drawSpriteStackBuf(*f, x, y, w, h, transparentIndex);
+
+    /* Only close what we opened -- a caller-supplied file stays open. */
+    if (!file) {
+        fileClose(local);
+    }
+    return result;
+}
+
+/* --- By path --------------------------------------------------------- */
+
+int drawSpriteFile(const char *path, int x, int y, int transparentIndex) {
+    return drawSpriteImpl(nullptr, path, x, y, -1, -1, transparentIndex);
+}
+
+int drawSpriteFile(const char *path, int x, int y, int w, int h, int transparentIndex) {
+    return drawSpriteImpl(nullptr, path, x, y, w, h, transparentIndex);
+}
+
+/* --- By open File ---------------------------------------------------- */
+
+int drawSpriteFile(File *file, int x, int y, int w, int h, uint8_t idx, int transparentIndex) {
+    sdSeek(file, (w * h * idx) / 2);
+    return drawSpriteImpl(file, nullptr, x, y, w, h, transparentIndex);
 }
