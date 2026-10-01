@@ -91,10 +91,11 @@ static void fatal(const char *l1, const char *l2) {
 }
 
 
-bool loadAll(SpriteFile (&spriteFiles)[Images::Count])
-{
+bool loadAll(SpriteFile (&spriteFiles)[Images::Count]) {
+
     /* Mount once. 24 MHz, stepping down to 12/6 MHz only if the card cannot
      * read its own boot sector reliably at speed. */
+
     if (!SD.begin(PIN_SD_CS)) {
         fatal("SD mount failed", "card? FAT16/32?");
         return false;
@@ -166,6 +167,41 @@ bool loadAll(SpriteFile (&spriteFiles)[Images::Count])
     return true;
 }
 
+/* ldWord: load 4 bytes starting at p as one 32-bit value (little-endian).
+ *
+ * Used by rowCopyDiff() so a sprite row can be compared against the
+ * framebuffer a word at a time instead of a byte at a time.
+ *
+ * p must be at least 2-byte aligned. `half` tells us which case we are in:
+ *
+ *   half == false   p % 4 == 0   Aligned. One 32-bit load.
+ *
+ *   half == true    p % 4 == 2   Only halfword aligned. A direct 32-bit load
+ *                                would be misaligned, which the QingKe core
+ *                                may handle slowly or fault on, so build the
+ *                                word from two aligned 16-bit loads instead.
+ *                                Costs two loads rather than one, but both
+ *                                are aligned.
+ *
+ * Why p % 4 == 2 happens: the fire files have a 2-byte header, so every
+ * row starts at offset 2 (mod 4) in the 512-byte block buffer.
+ *
+ * `half` is constant for the whole row, so the compiler can hoist the
+ * branch out of the calling loop.
+ *
+ * Note: the pointer casts technically break strict aliasing. They work here,
+ * but re-check if the optimisation level or compiler ever changes.
+ */
+
+static inline uint32_t ldWord(const uint8_t *p, bool half) {
+
+    if (!half) return *(const uint32_t *)p;
+    const uint16_t *h = (const uint16_t *)p;
+    return (uint32_t)h[0] | ((uint32_t)h[1] << 16);    /* little-endian */
+    
+}
+
+
 /*
  * Copy one row into the framebuffer, touching only what differs.
  *
@@ -174,12 +210,6 @@ bool loadAll(SpriteFile (&spriteFiles)[Images::Count])
  * unchanged row costs two comparisons per unit and no stores, and the
  * caller learns the changed column range for free. Returns false if the
  * row is identical to what is already there. *lo / *hi are BYTE offsets.
- *
- * MEASURED, NOT ASSUMED: the first version compared a byte at a time, on
- * the theory that it would hide inside the ~171 us each 512-byte block
- * takes to arrive by DMA. The on-device profile (-DSD_PROFILE) said
- * otherwise: ~220 us per block, about 20 cycles per byte - longer than the
- * DMA, so it became THE bottleneck of the whole frame. Hence word units.
  *
  * Alignment. The framebuffer row is word-aligned whenever x is a multiple
  * of 8. The source row sits wherever it falls in the 512-byte block
@@ -194,18 +224,11 @@ bool loadAll(SpriteFile (&spriteFiles)[Images::Count])
  * Word granularity means the dirty span is reported in 8-pixel steps,
  * which is exactly the 12 bpp flush alignment CHGfx rounds to anyway.
  */
-static inline uint32_t ldWord(const uint8_t *p, bool half)
-{
-    if (!half) return *(const uint32_t *)p;
-    const uint16_t *h = (const uint16_t *)p;
-    return (uint32_t)h[0] | ((uint32_t)h[1] << 16);    /* little-endian */
-}
 
-// static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n,
-//                                    uint16_t *lo, uint16_t *hi)
-static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n)
-{
+static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n) {
+
     if ((((uintptr_t)dst | n) & 3) == 0 && ((uintptr_t)src & 1) == 0) {
+
         const bool half  = ((uintptr_t)src & 2) != 0;
         uint32_t  *d     = (uint32_t *)dst;
         const uint16_t words = n >> 2;
@@ -217,6 +240,7 @@ static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n)
         while (ldWord(src + 4 * j, half) == d[j]) j--;     /* stops at i at the latest */
         for (uint16_t k = i; k <= j; k++) d[k] = ldWord(src + 4 * k, half);
         return true;
+
     }
 
     /* Byte fallback: odd source address, or a width that is not a whole
@@ -224,17 +248,17 @@ static SV_RAMFUNC bool rowCopyDiff(uint8_t *dst, const uint8_t *src, uint16_t n)
     uint16_t i = 0;
     while (i < n && dst[i] == src[i]) i++;
     if (i == n) return false;
+
     uint16_t j = n - 1;
     while (dst[j] == src[j]) j--;
-    // *lo = i;
-    // *hi = j;
     for (uint16_t k = i; k <= j; k++) dst[k] = src[k];
+
     return true;
 }
 
 /* One complete sprite row has arrived: put it on screen (in the framebuffer). */
-static SV_CONSUMER void emitRow(DrawCtx &c, const uint8_t *src)
-{
+static SV_CONSUMER void emitRow(DrawCtx &c, const uint8_t *src) {
+
     const int sy = c.y + c.row;
     c.row++;
     if (sy < 0 || sy >= GFX_H) return;     /* belt and braces: range is pre-clipped */
@@ -242,20 +266,24 @@ static SV_CONSUMER void emitRow(DrawCtx &c, const uint8_t *src)
     const int w = c.s->w;
 
     if (c.direct) {
+
         /* Opaque, even x, even width, fully inside horizontally: the row's
          * bytes ARE the framebuffer bytes. */
+
         uint8_t *dst = gfx_fb + (uint32_t)sy * GFX_FB_STRIDE + (c.x >> 1);
         uint16_t lo, hi;
-        // rowCopyDiff(dst, src, c.rowBytes, &lo, &hi));
         rowCopyDiff(dst, src, c.rowBytes);
-    } else {
+
+    } 
+    else {
+
         /* Transparency, odd alignment or horizontal clipping: let CHGfx's
          * nibble-aware blit handle it, one row at a time. We cannot cheaply
          * tell what changed, so report the whole visible span. */
         gfx_blit(src, c.x, sy, w, 1, c.transparent);
         int x0 = c.x < 0 ? 0 : c.x;
         int x1 = c.x + w > GFX_W ? GFX_W : c.x + w;
-        // dirtyAdd(c.dirty, x0, sy, x1);
+
     }
 }
 
@@ -264,29 +292,33 @@ static SV_CONSUMER void emitRow(DrawCtx &c, const uint8_t *src)
  * Bytes before startByte (header, clipped rows, the unused front of the
  * first block) and after endByte are dropped; the rest is cut into rows.
  */
-static SV_CONSUMER void consume(DrawCtx &c, const uint8_t *p, uint32_t n)
-{
+static SV_CONSUMER void consume(DrawCtx &c, const uint8_t *p, uint32_t n) {
+
     /* Leading bytes we do not want. */
     if (c.off < c.startByte) {
         uint32_t k = c.startByte - c.off;
         if (k > n) k = n;
         p += k; n -= k; c.off += k;
     }
+
     /* Trailing bytes we do not want. */
     if (c.off >= c.endByte) {
         c.off += n;
         return;
     }
+
     if (c.off + n > c.endByte) n = c.endByte - c.off;
     c.off += n;
 
     while (n) {
+
         if (c.carryLen == 0 && n >= c.rowBytes) {
             emitRow(c, p);                 /* whole row in place: no copy */
             p += c.rowBytes;
             n -= c.rowBytes;
             continue;
         }
+
         /* Row split across a block boundary: gather it. */
         uint16_t k = c.rowBytes - c.carryLen;
         if (k > n) k = (uint16_t)n;
@@ -294,17 +326,21 @@ static SV_CONSUMER void consume(DrawCtx &c, const uint8_t *p, uint32_t n)
         c.carryLen += k;
         p += k;
         n -= k;
+
         if (c.carryLen == c.rowBytes) {
             emitRow(c, c.carry);
             c.carryLen = 0;
         }
+
     }
+
 }
 
 /* readBlocksPipelined() callback: runs while the NEXT block is arriving. */
-static SV_CONSUMER void onBlock(const uint8_t *block, void *user)
-{
+static SV_CONSUMER void onBlock(const uint8_t *block, void *user) {
+
     consume(*static_cast<DrawCtx *>(user), block, 512);
+
 }
 
 /* ------------------------------------------------------------------------ */
@@ -312,15 +348,14 @@ static SV_CONSUMER void onBlock(const uint8_t *block, void *user)
 /* ------------------------------------------------------------------------ */
 /* Returns false if nothing of the sprite is on screen. */
 static bool setupCtx(DrawCtx &c, const SpriteFile &s, int x, int y,
-                     int transparent)
-{
+                     int transparent) {
+
     c.s           = &s;
     c.x           = x;
     c.y           = y;
     c.transparent = transparent;
     c.rowBytes    = (uint16_t)((s.w + 1) >> 1);
     c.carryLen    = 0;
-    // c.dirty       = dirty;
 
     /* Fully off screen? */
     if (x >= GFX_W || y >= GFX_H || x + s.w <= 0 || y + s.h <= 0) return false;
@@ -342,8 +377,8 @@ static bool setupCtx(DrawCtx &c, const SpriteFile &s, int x, int y,
 /* ------------------------------------------------------------------------ */
 /* spriteLoad                                                                */
 /* ------------------------------------------------------------------------ */
-int spriteLoad(SpriteFile &spriteFile, const char *path)
-{
+int spriteLoad(SpriteFile &spriteFile, const char *path) {
+
     spriteFile.w = spriteFile.h = 0;
     spriteFile.blocks = 0;
     spriteFile.tailLen = 0;
@@ -401,10 +436,10 @@ int spriteLoad(SpriteFile &spriteFile, const char *path)
 }
 
 /* ------------------------------------------------------------------------ */
-/* spriteDraw                                                                */
+/* spriteDraw                                                               */
 /* ------------------------------------------------------------------------ */
-int spriteDraw(const SpriteFile &spriteFile, int x, int y, int transparent)
-{
+int spriteDraw(const SpriteFile &spriteFile, int x, int y, int transparent) {
+
     if (spriteFile.w == 0) return SPRITE_ERR_NOT_LOADED;
 
     DrawCtx c;
@@ -589,7 +624,7 @@ static int drawSpriteImpl(File *file, const char *path, int x, int y, int w, int
 }
 
 /* --- By path --------------------------------------------------------- */
-
+//drawSpriteFile(&f, 0, 64, 128, 64, fireIdx, Colors::Transparent);
 int drawSpriteFile(const char *path, int x, int y, int transparentIndex) {
     return drawSpriteImpl(nullptr, path, x, y, -1, -1, transparentIndex);
 }
@@ -601,6 +636,9 @@ int drawSpriteFile(const char *path, int x, int y, int w, int h, int transparent
 /* --- By open File ---------------------------------------------------- */
 
 int drawSpriteFile(File *file, int x, int y, int w, int h, uint8_t idx, int transparentIndex) {
+
     sdSeek(file, (w * h * idx) / 2);
-    return drawSpriteImpl(file, nullptr, x, y, w, h, transparentIndex);
+    uint8_t i = drawSpriteImpl(file, nullptr, x, y, w, h, transparentIndex);
+    return i;
+
 }

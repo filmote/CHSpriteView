@@ -484,7 +484,7 @@ namespace SDLib {
        error.
 
     */
-
+Serial.println(filepath);
     int pathidx = 0;
 
     // do the interactive search

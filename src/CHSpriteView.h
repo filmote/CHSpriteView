@@ -3,34 +3,6 @@
 /*
  * CHSpriteView - draw packed 4 bpp sprites from microSD into CHGfx's
  * framebuffer, fast enough to animate from the card every frame.
- *
- * Originally by Simon (filmote). Optimised for the CHGame board; every
- * change is described where it is made, and the story as a whole is in
- * the header comment of CHSpriteView.cpp.
- *
- * ---------------------------------------------------------------------------
- * FILE FORMAT (unchanged, as written by the PNG -> CHGfx converter)
- * ---------------------------------------------------------------------------
- *   byte 0      width  w (pixels, 1..255)
- *   byte 1      height h (pixels, 1..255)
- *   then        h rows of ceil(w/2) bytes, 2 px per byte, even x in the
- *               LOW nibble - exactly CHGfx's framebuffer packing, which is
- *               what lets opaque sprites be copied into it byte for byte.
- *  Load once, draw many (the fast one - use this for animation):
- *
- *    SpriteFile spriteFiles[16];
- *    spriteLoad(spriteFiles[i], "FIRE/FIRE_00.BIN");  // in setup()
- *    ...
- *    spriteDraw(spriteFiles[frame], 0, 64, -1);       // in loop()
- *    gfx_flushRectAsync(0, 0, 128, 128);              // The whole screen or only what changed
- *
- *  spriteLoad() opens the file ONCE, finds where it physically lives
- *  on the card, and remembers that (20 bytes). spriteDraw() then never
- *  touches the file system again: one CMD18 streams the blocks straight
- *  in, with the next block arriving by DMA while the previous one is
- *  being copied.
- * 
- * Call SD.begin() once in setup() before either. Never call it per access.
  */
 #include <CHGfx.h>
 #include "SD/SD.h"
@@ -81,59 +53,17 @@ struct SpriteFile {
     uint8_t  tail[SPRITE_TAIL_MAX];   /* the bytes after the last full block   */
 };
 
-/* ------------------------------------------------------------------------ */
-/* Dirty region                                                              */
-/* ------------------------------------------------------------------------ */
-/* Screen area whose framebuffer bytes actually CHANGED during a draw.
- *
- * Opaque draws diff every row against what is already in the framebuffer,
- * so an animation frame reports only the pixels that differ from the
- * previous one. Flushing just those to the panel is the biggest saving
- * there is, because the LCD transfer is as large a slice of the frame as
- * the SD read. Transparent draws report their whole on-screen rows.
- *
- * Why bands rather than one rectangle: a single bounding box of the fire's
- * changes is ~3750 px, but only ~1560 px really change - the flames are
- * ragged, not rectangular. Keeping one box per 16-row screen band follows
- * the outline more closely; spriteFlushDirty() then merges neighbouring
- * bands whenever one bigger rectangle is cheaper than two (each rectangle
- * costs a window command and a pipeline restart).
- *
- * Measured on the device (12 bpp, fire demo), pixels sent / fps:
- *   one bounding box        3750 px  221 fps
- *   16-row bands            3055 px  231 fps
- *    8-row bands            2900 px  233 fps   <- default
- *    4-row bands            2830 px  230 fps   (more rectangles than it saves)
- * 16 bands x 8 bytes = 128 bytes, on the caller's stack. */
-#ifndef SPRITE_BAND_ROWS
-#define SPRITE_BAND_ROWS 8             /* power of two, divides GFX_H */
-#endif
-#define SPRITE_BANDS (GFX_H / SPRITE_BAND_ROWS)
 
-/* Estimated fixed cost of flushing one extra rectangle, in bytes of wire
- * time (window setup + first chunk conversion before the DMA starts).
- * Swept 48 / 96 / 200 on the device: 48 merges too little, 96-200 are
- * within noise of each other. */
-#ifndef SPRITE_RECT_OVERHEAD_BYTES
-#define SPRITE_RECT_OVERHEAD_BYTES 192
-#endif
 
-/* Half-open [x0, x1) x [y0, y1); empty when x1 <= x0. */
-struct SpriteRect {
-    int16_t x0, y0, x1, y1;
-};
-
-/* ------------------------------------------------------------------------ */
-/* API                                                                       */
-/* ------------------------------------------------------------------------ */
 /* Open `path`, read its header, and record where its data sits on the card.
  * The file is closed again before returning; the SpriteFile is all that is
  * kept. Fails with SPRITE_ERR_FRAGMENTED if the file is not stored in
  * consecutive clusters (re-copy it to a freshly formatted card). */
 int spriteLoad(SpriteFile &spriteFile, const char *path);
 
+
 /* Draw a loaded sprite into the framebuffer at (x, y).
- *   transparent  -1 = opaque; 0..15 = palette index to leave undrawn.
+ * transparent  -1 = opaque; 0..15 = palette index to leave undrawn.
  * Only touches gfx_fb - call gfx_flush*() yourself afterwards. Waits for
  * any async flush in flight first, because it borrows CHGfx's two 512-byte
  * DMA chunk buffers as landing space for the card data. */
